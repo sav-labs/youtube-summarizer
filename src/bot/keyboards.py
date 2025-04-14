@@ -17,15 +17,19 @@ def create_main_keyboard() -> ReplyKeyboardMarkup:
     Returns:
         ReplyKeyboardMarkup: Main keyboard
     """
-    keyboard = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    
     help_button = KeyboardButton(text='❓ Помощь')
     models_button = KeyboardButton(text='🔄 Выбрать модель')
     language_button = KeyboardButton(text='🌐 Выбрать язык')
     settings_button = KeyboardButton(text='⚙️ Настройки')
     
-    keyboard.add(help_button, models_button)
-    keyboard.add(language_button, settings_button)
+    # In Aiogram 3.x, we need to create a keyboard with a list of lists of buttons
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [help_button, models_button],
+            [language_button, settings_button]
+        ],
+        resize_keyboard=True
+    )
     
     return keyboard
 
@@ -36,17 +40,21 @@ def create_admin_keyboard() -> ReplyKeyboardMarkup:
     Returns:
         ReplyKeyboardMarkup: Admin keyboard
     """
-    keyboard = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    
     help_button = KeyboardButton(text='❓ Помощь')
     models_button = KeyboardButton(text='🔄 Выбрать модель')
     language_button = KeyboardButton(text='🌐 Выбрать язык')
     settings_button = KeyboardButton(text='⚙️ Настройки')
     users_button = KeyboardButton(text='👥 Пользователи')
     
-    keyboard.add(help_button, models_button)
-    keyboard.add(language_button, settings_button)
-    keyboard.add(users_button)
+    # In Aiogram 3.x, we need to create a keyboard with a list of lists of buttons
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [help_button, models_button],
+            [language_button, settings_button],
+            [users_button]
+        ],
+        resize_keyboard=True
+    )
     
     return keyboard
 
@@ -78,8 +86,8 @@ def create_models_keyboard(models: List[str], current_model: Optional[str] = Non
         x
     ))
     
-    # Create keyboard
-    keyboard = InlineKeyboardMarkup(row_width=1)
+    # Create buttons for models
+    keyboard_buttons = []
     added_models = set()
     
     for model in sorted_models:
@@ -94,14 +102,18 @@ def create_models_keyboard(models: List[str], current_model: Optional[str] = Non
         is_current = (model == current_model)
         button_text = f"{model} ✓" if is_current else model
         
-        # Add button
-        keyboard.add(InlineKeyboardButton(
-            text=button_text,
-            callback_data=f"set_model:{model}"
-        ))
+        # Add button to the list
+        keyboard_buttons.append([
+            InlineKeyboardButton(text=button_text, callback_data=f"set_model:{model}")
+        ])
     
     # Add back button
-    keyboard.add(InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main"))
+    keyboard_buttons.append([
+        InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")
+    ])
+    
+    # Create the keyboard with the buttons
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
     
     return keyboard
 
@@ -112,8 +124,6 @@ def create_language_keyboard() -> InlineKeyboardMarkup:
     Returns:
         InlineKeyboardMarkup: Language selection keyboard
     """
-    keyboard = InlineKeyboardMarkup(row_width=2)
-    
     # Default option (Russian + English)
     ru_en_button = InlineKeyboardButton(
         text="🇷🇺🇬🇧 Русский+Английский (по умолчанию)", 
@@ -131,12 +141,14 @@ def create_language_keyboard() -> InlineKeyboardMarkup:
     # Back button
     back_button = InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")
     
-    # Add buttons to keyboard
-    keyboard.add(ru_en_button)
-    keyboard.add(ru_button, en_button)
-    keyboard.add(de_button, fr_button)
-    keyboard.add(es_button, it_button)
-    keyboard.add(back_button)
+    # Create keyboard with buttons
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [ru_en_button],
+        [ru_button, en_button],
+        [de_button, fr_button],
+        [es_button, it_button],
+        [back_button]
+    ])
     
     return keyboard
 
@@ -147,8 +159,6 @@ def create_settings_keyboard() -> InlineKeyboardMarkup:
     Returns:
         InlineKeyboardMarkup: Settings keyboard
     """
-    keyboard = InlineKeyboardMarkup(row_width=1)
-    
     # Settings options
     reset_button = InlineKeyboardButton(text="🔄 Сбросить настройки", callback_data="settings:reset")
     about_button = InlineKeyboardButton(text="ℹ️ О боте", callback_data="settings:about")
@@ -156,8 +166,12 @@ def create_settings_keyboard() -> InlineKeyboardMarkup:
     # Back button
     back_button = InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")
     
-    # Add buttons to keyboard
-    keyboard.add(reset_button, about_button, back_button)
+    # Create keyboard with buttons
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [reset_button],
+        [about_button],
+        [back_button]
+    ])
     
     return keyboard
 
@@ -168,13 +182,13 @@ def create_access_request_keyboard() -> InlineKeyboardMarkup:
     Returns:
         InlineKeyboardMarkup: Access request keyboard
     """
-    keyboard = InlineKeyboardMarkup(row_width=1)
-    
     # Access request button
     request_button = InlineKeyboardButton(text="🔑 Запросить доступ", callback_data="request_access")
     
-    # Add button to keyboard
-    keyboard.add(request_button)
+    # Create keyboard with button
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [request_button]
+    ])
     
     return keyboard
 
@@ -188,8 +202,6 @@ def create_admin_notification_keyboard(user_id: int) -> InlineKeyboardMarkup:
     Returns:
         InlineKeyboardMarkup: Admin notification keyboard
     """
-    keyboard = InlineKeyboardMarkup(row_width=2)
-    
     # Approval options
     grant_unlimited = InlineKeyboardButton(
         text="✅ Дать безлимит", 
@@ -217,10 +229,12 @@ def create_admin_notification_keyboard(user_id: int) -> InlineKeyboardMarkup:
         callback_data=f"reject_access:{user_id}"
     )
     
-    # Add buttons to keyboard
-    keyboard.add(grant_unlimited)
-    keyboard.add(grant_one, grant_three)
-    keyboard.add(grant_five, reject_button)
+    # Create keyboard with buttons
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [grant_unlimited],
+        [grant_one, grant_three],
+        [grant_five, reject_button]
+    ])
     
     return keyboard
 
@@ -236,96 +250,109 @@ def create_user_list_keyboard(user_ids: List[int], page: int = 0, page_size: int
     Returns:
         InlineKeyboardMarkup: User list keyboard
     """
-    keyboard = InlineKeyboardMarkup(row_width=1)
-    
     # Calculate pagination
     total_pages = (len(user_ids) - 1) // page_size + 1
     start_idx = page * page_size
     end_idx = min(start_idx + page_size, len(user_ids))
     current_page_users = user_ids[start_idx:end_idx]
     
+    # Create buttons list
+    keyboard_buttons = []
+    
     # Add user buttons
     for user_id in current_page_users:
-        keyboard.add(InlineKeyboardButton(
-            text=f"👤 Пользователь {user_id}", 
-            callback_data=f"user_info:{user_id}"
-        ))
+        keyboard_buttons.append([
+            InlineKeyboardButton(
+                text=f"👤 Пользователь {user_id}", 
+                callback_data=f"user_info:{user_id}"
+            )
+        ])
     
-    # Add pagination buttons
-    pagination_row = []
+    # Add pagination buttons if necessary
+    if total_pages > 1:
+        pagination_row = []
+        
+        # Add "Previous" button if not on first page
+        if page > 0:
+            pagination_row.append(
+                InlineKeyboardButton(
+                    text="⬅️ Назад", 
+                    callback_data=f"user_list:{page-1}"
+                )
+            )
+        
+        # Add page indicator
+        pagination_row.append(
+            InlineKeyboardButton(
+                text=f"📄 {page+1}/{total_pages}", 
+                callback_data="noop"
+            )
+        )
+        
+        # Add "Next" button if not on last page
+        if page < total_pages - 1:
+            pagination_row.append(
+                InlineKeyboardButton(
+                    text="➡️ Вперед", 
+                    callback_data=f"user_list:{page+1}"
+                )
+            )
+        
+        keyboard_buttons.append(pagination_row)
     
-    if page > 0:
-        pagination_row.append(InlineKeyboardButton(
-            text="◀️ Пред.",
-            callback_data=f"user_list:{page-1}"
-        ))
+    # Add "Back to main" button
+    keyboard_buttons.append([
+        InlineKeyboardButton(text="⬅️ В главное меню", callback_data="back_to_main")
+    ])
     
-    pagination_row.append(InlineKeyboardButton(
-        text=f"📄 {page+1}/{total_pages}",
-        callback_data="noop"
-    ))
-    
-    if page < total_pages - 1:
-        pagination_row.append(InlineKeyboardButton(
-            text="След. ▶️",
-            callback_data=f"user_list:{page+1}"
-        ))
-    
-    # Add pagination row
-    keyboard.row(*pagination_row)
-    
-    # Add back button
-    keyboard.add(InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main"))
+    # Create keyboard with buttons
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
     
     return keyboard
 
 def create_user_management_keyboard(user_id: int) -> InlineKeyboardMarkup:
     """
-    Creates a keyboard for user management.
+    Creates a keyboard for managing a specific user.
     
     Args:
-        user_id: User ID
+        user_id: ID of the user to manage
         
     Returns:
         InlineKeyboardMarkup: User management keyboard
     """
-    keyboard = InlineKeyboardMarkup(row_width=2)
-    
-    # User management options
+    # Create buttons
     grant_unlimited = InlineKeyboardButton(
-        text="♾️ Безлимит", 
+        text="♾️ Дать безлимитный доступ", 
         callback_data=f"grant_access:{user_id}:-1"
     )
     
-    grant_one = InlineKeyboardButton(
-        text="1️⃣ 1 запрос", 
-        callback_data=f"grant_access:{user_id}:1"
-    )
-    
-    grant_five = InlineKeyboardButton(
-        text="5️⃣ 5 запросов", 
+    grant_requests = InlineKeyboardButton(
+        text="🎯 Добавить запросы", 
         callback_data=f"grant_access:{user_id}:5"
     )
     
-    grant_ten = InlineKeyboardButton(
-        text="🔟 10 запросов", 
-        callback_data=f"grant_access:{user_id}:10"
-    )
-    
-    revoke_button = InlineKeyboardButton(
+    revoke_access = InlineKeyboardButton(
         text="🚫 Отозвать доступ", 
         callback_data=f"revoke_access:{user_id}"
     )
     
-    back_button = InlineKeyboardButton(
-        text="⬅️ Назад к списку", 
-        callback_data=f"user_list:0"
+    back_to_list = InlineKeyboardButton(
+        text="📋 К списку пользователей", 
+        callback_data="user_list:0"
     )
     
-    # Add buttons to keyboard
-    keyboard.add(grant_unlimited, grant_one)
-    keyboard.add(grant_five, grant_ten)
-    keyboard.add(revoke_button)
-    keyboard.add(back_button)
+    back_to_main = InlineKeyboardButton(
+        text="⬅️ В главное меню", 
+        callback_data="back_to_main"
+    )
+    
+    # Create keyboard with buttons
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [grant_unlimited],
+        [grant_requests],
+        [revoke_access],
+        [back_to_list],
+        [back_to_main]
+    ])
     
     return keyboard 
