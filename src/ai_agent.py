@@ -4,7 +4,6 @@ Handles OpenAI API interactions for various AI tasks.
 """
 import asyncio
 import os
-import sys
 from typing import List, Optional, Dict, Any
 from openai import AsyncOpenAI
 import httpx

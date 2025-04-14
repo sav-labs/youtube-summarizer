@@ -1,13 +1,7 @@
 """
-Summarizer for the YouTube Summarizer Bot.
-Handles text summarization using OpenAI API through AI agent.
+Summarizer module for the YouTube Summarizer Bot.
+Handles text summarization using OpenAI API.
 """
-import os
-import logging
-import time
-from dotenv import load_dotenv
-import math
-import openai
 import re
 from typing import List, Optional
 from loguru import logger

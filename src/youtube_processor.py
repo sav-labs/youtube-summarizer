@@ -3,7 +3,6 @@ YouTube Processor for the YouTube Summarizer Bot.
 Handles fetching transcripts and metadata from YouTube videos.
 """
 import re
-import time
 import aiohttp
 from pathlib import Path
 from typing import List, Optional, Tuple
