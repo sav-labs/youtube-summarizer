@@ -1,0 +1,5 @@
+python-dotenv==1.0.1
+pyTelegramBotAPI==4.14.1
+youtube-transcript-api==0.6.1
+requests==2.31.0
+openai==0.28.0 
