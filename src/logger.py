@@ -1,51 +1,43 @@
-import logging
+"""
+Logger configuration for the YouTube Summarizer Bot.
+Uses loguru for better logging capabilities.
+"""
 import os
 import sys
-from logging.handlers import RotatingFileHandler
+from loguru import logger
+from src.config.settings import LOGGING_LEVEL
 
-def setup_logger(level=logging.INFO):
+def setup_logger():
     """
-    Настройка логирования для приложения
+    Configures and returns a loguru logger instance.
     
-    Args:
-        level: Уровень логирования (по умолчанию INFO)
-        
     Returns:
-        logger: Настроенный логгер
+        logger: Configured loguru logger
     """
-    # Создаем директорию для логов если не существует
+    # Create logs directory if it doesn't exist
     os.makedirs('logs', exist_ok=True)
     
-    # Получаем логгер
-    logger = logging.getLogger('youtube_summarizer')
-    logger.setLevel(level)  # Устанавливаем уровень логирования
+    # Remove default handlers
+    logger.remove()
     
-    # Очищаем любые существующие хендлеры (для переиспользования)
-    if logger.handlers:
-        logger.handlers.clear()
-    
-    # Формат логов
-    log_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s', 
-                                   datefmt='%Y-%m-%d %H:%M:%S')
-    
-    # Хендлер для вывода в консоль
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(log_format)
-    console_handler.setLevel(level)
-    
-    # Хендлер для записи в файл с ротацией (5 файлов по 5MB)
-    file_handler = RotatingFileHandler(
-        'logs/youtube_summarizer.log', 
-        maxBytes=5*1024*1024,  # 5MB
-        backupCount=5
+    # Add console handler
+    logger.add(
+        sys.stdout,
+        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+        level=LOGGING_LEVEL,
+        colorize=True
     )
-    file_handler.setFormatter(log_format)
-    file_handler.setLevel(level)
     
-    # Добавляем хендлеры к логгеру
-    logger.addHandler(console_handler)
-    logger.addHandler(file_handler)
+    # Add file handler with rotation
+    logger.add(
+        "logs/youtube_summarizer.log",
+        format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
+        level=LOGGING_LEVEL,
+        rotation="5 MB",
+        compression="zip",
+        retention=5
+    )
     
-    logger.info(f"Настроено логирование с уровнем: {logging.getLevelName(level)}")
+    logger.info(f"Logging configured with level: {logger.level(LOGGING_LEVEL).name}")
     
     return logger 
