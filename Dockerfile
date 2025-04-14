@@ -15,13 +15,5 @@ RUN mkdir -p /app/logs
 # Set PYTHONPATH to include the project root for proper imports
 ENV PYTHONPATH=/app
 
-# Handle proxy settings through environment variables
-# These will be empty unless set when running the container
-ENV HTTP_PROXY=""
-ENV HTTPS_PROXY=""
-ENV http_proxy=""
-ENV https_proxy=""
-ENV no_proxy=""
-
 # Запуск бота
 CMD ["python", "src/app.py"] 

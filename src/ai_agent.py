@@ -4,8 +4,10 @@ Handles OpenAI API interactions for various AI tasks.
 """
 import asyncio
 import os
+import sys
 from typing import List, Optional, Dict, Any
 from openai import AsyncOpenAI
+import httpx
 from loguru import logger
 from src.config.settings import OPENAI_API_KEY
 from src.config.prompts import SYSTEM_PROMPTS, SUMMARIZE_PROMPT, COMBINE_SUMMARIES_PROMPT, ERROR_RESPONSE_PROMPT, UNKNOWN_MESSAGE_PROMPT, ACCESS_REQUEST_ADMIN_PROMPT
@@ -18,14 +20,15 @@ class AIAgent:
     def __init__(self):
         """
         Initializes the AI Agent with OpenAI client.
-        
-        Note: If proxy settings are needed, they should be set as environment variables:
-        - HTTPS_PROXY: https://your-proxy:port
-        - HTTP_PROXY: http://your-proxy:port
         """
-        # In the current OpenAI SDK version, proxies are set through environment variables
-        # rather than through the client constructor
-        self.client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+        # Create a clean httpx client with no proxy settings
+        http_client = httpx.AsyncClient()
+        
+        # Initialize the OpenAI client with our custom http_client
+        self.client = AsyncOpenAI(
+            api_key=OPENAI_API_KEY,
+            http_client=http_client
+        )
         logger.info("AI Agent initialized with OpenAI client")
     
     async def list_models(self) -> List[str]:
