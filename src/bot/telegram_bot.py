@@ -853,7 +853,20 @@ class TelegramBot:
             
             # Clean up title and summary
             clean_title = re.sub(r'\s*\([Чч]асть \d+ из \d+\)\s*', '', title)
-            clean_summary = re.sub(r'^\s*\*?\s*[Чч]асть \d+ из \d+\s*\*?\s*$', '', summary, flags=re.MULTILINE)
+            
+            # Enhanced cleaning of part references and URLs
+            clean_summary = summary
+            # Remove part X of Y references
+            clean_summary = re.sub(r'(?i)([чЧ]асть|part) \d+ из \d+', '', clean_summary)
+            clean_summary = re.sub(r'(?i)\(([чЧ]асть|part) \d+/\d+\)', '', clean_summary)
+            # Remove any markdown links to YouTube
+            clean_summary = re.sub(r'\[.*?\]\(https?://(?:www\.)?youtu(?:be\.com|\.be).*?\)', '', clean_summary)
+            # Remove direct YouTube URLs
+            clean_summary = re.sub(r'https?://(?:www\.)?youtu(?:be\.com|\.be)/\S+', '', clean_summary)
+            # Remove "source:" or "источник:" references
+            clean_summary = re.sub(r'(?i)(?:источник|source):\s*\[.*?\](?:\(.*?\))?', '', clean_summary)
+            # Clean up any double line breaks created by the removals
+            clean_summary = re.sub(r'\n\s*\n\s*\n', '\n\n', clean_summary)
             
             # Send result
             logger.info(f"Sending analysis result to user {user.display_name}")

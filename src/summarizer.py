@@ -218,7 +218,9 @@ class Summarizer:
             logger.info(f"Summarizing chunk {i+1}/{len(chunks)} with length {len(chunk)}")
             
             try:
-                chunk_summary = await self.ai_agent.summarize_text(chunk, f"{title} (часть {i+1} из {len(chunks)})", model)
+                # Don't add "part X of Y" to the title for chunk summarization 
+                # This avoids confusing the AI and keeps it from adding this reference in the final output
+                chunk_summary = await self.ai_agent.summarize_text(chunk, title, model)
                 summaries.append(chunk_summary)
                 logger.info(f"Completed summary for chunk {i+1}/{len(chunks)}")
             except Exception as e:
@@ -236,6 +238,6 @@ class Summarizer:
             return combined_summary
         except Exception as e:
             logger.error(f"Error combining summaries: {str(e)}")
-            # Fallback: join summaries with headers
-            fallback = "\n\n".join([f"## Часть {i+1}\n\n{summary}" for i, summary in enumerate(summaries)])
+            # Fallback: join summaries with headers (without part references)
+            fallback = "\n\n".join([f"## Раздел {i+1}\n\n{summary}" for i, summary in enumerate(summaries)])
             return fallback 
