@@ -12,5 +12,8 @@ COPY . .
 # Создание директории для логов и данных
 RUN mkdir -p /app/logs
 
+# Set PYTHONPATH to include the project root for proper imports
+ENV PYTHONPATH=/app
+
 # Запуск бота
 CMD ["python", "src/app.py"] 
