@@ -3,6 +3,7 @@ Summarizer module for the YouTube Summarizer Bot.
 Handles text summarization using OpenAI API.
 """
 import re
+import time
 from typing import List, Optional
 from loguru import logger
 from src.ai_agent import AIAgent
