@@ -2,6 +2,12 @@
 Configuration file with all prompts used in the application.
 All AI prompts are stored here for easy modification.
 """
+import os
+import json
+from loguru import logger
+
+# Path to custom prompts configuration file
+CUSTOM_PROMPTS_PATH = os.path.join("data", "config", "custom_prompts.json")
 
 # Prompt for video summarization
 SUMMARIZE_PROMPT = """
@@ -33,6 +39,9 @@ SUMMARIZE_PROMPT = """
 - Не включай никаких упоминаний о "части" или "части X из Y" в текст
 - Не добавляй ссылки на YouTube видео в резюме
 - Не указывай источник информации - это делается автоматически
+- Обязательно добавляй эмодзи к разделам для наглядности
+- Используй строго Markdown синтаксис для форматирования
+- Не используй дополнительные символы вроде ** или ## внутри заголовков
 """
 
 # Prompt for combining summaries of multiple chunks
@@ -53,6 +62,7 @@ COMBINE_SUMMARIES_PROMPT = """
 6. Добавляй подходящие по смыслу эмодзи для телеграм
 7. ВАЖНО: Не включай никаких упоминаний о "части X из Y" или номерах частей в финальный обзор
 8. ВАЖНО: Не включай ссылку на YouTube в результат
+9. ВАЖНО: Стандартизируй форматирование - избегай использования дополнительных символов форматирования внутри заголовков
 
 Результат должен быть структурированным, лаконичным и содержать только существенную информацию.
 """
@@ -90,11 +100,73 @@ ACCESS_REQUEST_ADMIN_PROMPT = """
 Желаете предоставить доступ этому пользователю?
 """
 
-# System prompts for each agent
-SYSTEM_PROMPTS = {
-    "summarizer": "Ты аналитик видеоконтента. Твоя задача - создавать краткие, информативные и структурированные обзоры на основе транскрипций видео. Выделяй главное, отбрасывай второстепенное.",
+# Default system prompts configuration with default models
+DEFAULT_SYSTEM_PROMPTS = {
+    "summarizer": {
+        "content": "Ты аналитик видеоконтента. Твоя задача - создавать краткие, информативные и структурированные обзоры на основе транскрипций видео. Выделяй главное, отбрасывай второстепенное. Обязательно используй эмодзи для каждого раздела и форматируй текст строго по Markdown.",
+        "model": "gpt-3.5-turbo-16k"
+    },
     
-    "error_handler": "Ты вежливый помощник, объясняющий пользователям проблемы при работе с ботом. Твои сообщения должны быть понятными и содержать рекомендации по решению проблемы.",
+    "error_handler": {
+        "content": "Ты вежливый помощник, объясняющий пользователям проблемы при работе с ботом. Твои сообщения должны быть понятными и содержать рекомендации по решению проблемы.",
+        "model": "gpt-3.5-turbo"
+    },
     
-    "admin_assistant": "Ты помощник администратора бота. Твоя задача - предоставлять чёткую информацию о пользователях и их запросах, помогая администратору принимать решения."
-} 
+    "admin_assistant": {
+        "content": "Ты помощник администратора бота. Твоя задача - предоставлять чёткую информацию о пользователях и их запросах, помогая администратору принимать решения.",
+        "model": "gpt-3.5-turbo"
+    }
+}
+
+# Function to load custom prompts if they exist
+def load_custom_prompts():
+    """
+    Load custom prompts from file if it exists,
+    otherwise use the default prompts.
+    
+    Returns:
+        dict: System prompts with content and model settings
+    """
+    # Create directory if it doesn't exist
+    os.makedirs(os.path.dirname(CUSTOM_PROMPTS_PATH), exist_ok=True)
+    
+    # If custom prompts file exists, load it
+    if os.path.exists(CUSTOM_PROMPTS_PATH):
+        try:
+            with open(CUSTOM_PROMPTS_PATH, 'r', encoding='utf-8') as f:
+                custom_prompts = json.load(f)
+            logger.info(f"Loaded custom prompts from {CUSTOM_PROMPTS_PATH}")
+            return custom_prompts
+        except Exception as e:
+            logger.error(f"Error loading custom prompts: {e}")
+            # Create the file with default values if there was an error
+            save_custom_prompts(DEFAULT_SYSTEM_PROMPTS)
+            return DEFAULT_SYSTEM_PROMPTS
+    else:
+        # Create the file with default values if it doesn't exist
+        save_custom_prompts(DEFAULT_SYSTEM_PROMPTS)
+        logger.info(f"Created default custom prompts file at {CUSTOM_PROMPTS_PATH}")
+        return DEFAULT_SYSTEM_PROMPTS
+
+def save_custom_prompts(prompts_data):
+    """
+    Save custom prompts to file.
+    
+    Args:
+        prompts_data (dict): Prompts data to save
+    """
+    try:
+        # Create directory if it doesn't exist
+        os.makedirs(os.path.dirname(CUSTOM_PROMPTS_PATH), exist_ok=True)
+        
+        with open(CUSTOM_PROMPTS_PATH, 'w', encoding='utf-8') as f:
+            json.dump(prompts_data, f, ensure_ascii=False, indent=2)
+        logger.info(f"Saved custom prompts to {CUSTOM_PROMPTS_PATH}")
+    except Exception as e:
+        logger.error(f"Error saving custom prompts: {e}")
+
+# Load system prompts configuration (content and models)
+SYSTEM_PROMPTS_CONFIG = load_custom_prompts()
+
+# Extract just the content for backward compatibility
+SYSTEM_PROMPTS = {k: v["content"] for k, v in SYSTEM_PROMPTS_CONFIG.items()} 

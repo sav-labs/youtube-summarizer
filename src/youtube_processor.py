@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 from loguru import logger
+import asyncio
 
 class YouTubeProcessor:
     """
@@ -54,15 +55,15 @@ class YouTubeProcessor:
         logger.error(f"Failed to extract video ID from URL: {url}")
         raise ValueError(f"Failed to extract video ID from URL: {url}")
     
-    async def get_video_info(self, video_id: str) -> str:
+    async def get_video_info(self, video_id: str) -> dict:
         """
-        Gets the title of a YouTube video.
+        Gets information about a YouTube video including title and author.
         
         Args:
             video_id: YouTube video ID
             
         Returns:
-            str: Video title or a fallback title
+            dict: Dictionary containing video information (title, author_name)
         """
         try:
             # Get video info through YouTube oEmbed API
@@ -73,15 +74,25 @@ class YouTubeProcessor:
                     if response.status == 200:
                         video_info = await response.json()
                         title = video_info.get('title', f"Video {video_id}")
-                        logger.info(f"Got video info: '{title}' (ID: {video_id})")
-                        return title
+                        author = video_info.get('author_name', 'Unknown creator')
+                        logger.info(f"Got video info: '{title}' by {author} (ID: {video_id})")
+                        return {
+                            'title': title,
+                            'author_name': author
+                        }
                     else:
-                        logger.warning(f"Failed to get video info, using ID as title")
-                        return f"Video {video_id}"
+                        logger.warning(f"Failed to get video info, status: {response.status}")
+                        return {
+                            'title': f"Video {video_id}",
+                            'author_name': 'Unknown creator'
+                        }
                 
         except Exception as e:
             logger.warning(f"Error getting video info: {str(e)}")
-            return f"Video {video_id}"
+            return {
+                'title': f"Video {video_id}",
+                'author_name': 'Unknown creator'
+            }
     
     async def get_subtitles(self, video_id: str, languages: List[str] = None) -> str:
         """
@@ -103,8 +114,11 @@ class YouTubeProcessor:
         logger.info(f"Getting subtitles for video ID: {video_id}, preferred languages: {languages}")
         
         try:
-            # Try to get subtitles in preferred languages
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+            # Run the synchronous YouTube API call in a thread pool to avoid blocking the event loop
+            loop = asyncio.get_event_loop()
+            transcript_list = await loop.run_in_executor(
+                None, lambda: YouTubeTranscriptApi.list_transcripts(video_id)
+            )
             
             # Try to get subtitles in preferred languages
             transcript = None
@@ -113,7 +127,10 @@ class YouTubeProcessor:
             for lang in languages:
                 try:
                     if lang in [t.language_code for t in transcript_list]:
-                        transcript = transcript_list.find_transcript([lang])
+                        # Run the synchronous find_transcript call in a thread pool
+                        transcript = await loop.run_in_executor(
+                            None, lambda: transcript_list.find_transcript([lang])
+                        )
                         logger.info(f"Found subtitles in language: {lang}")
                         break
                 except Exception as e:
@@ -122,7 +139,15 @@ class YouTubeProcessor:
             # If no subtitles in preferred languages, try generated ones
             if not transcript:
                 logger.info("No subtitles in preferred languages, trying generated ones")
-                transcript = transcript_list.find_generated_transcript(languages)
+                try:
+                    # Run the synchronous find_generated_transcript call in a thread pool
+                    transcript = await loop.run_in_executor(
+                        None, lambda: transcript_list.find_generated_transcript(languages)
+                    )
+                    if transcript:
+                        logger.info(f"Found generated subtitles")
+                except Exception as e:
+                    logger.debug(f"Could not get generated subtitles: {str(e)}")
                 
             # If that didn't work either, use any available subtitles
             if not transcript:
@@ -134,12 +159,10 @@ class YouTubeProcessor:
                 else:
                     raise NoTranscriptFound("No subtitles found")
             
-            # Get subtitles as text
-            subtitle_data = transcript.fetch()
+            # Get subtitles as text - run the synchronous fetch call in a thread pool
+            subtitle_data = await loop.run_in_executor(None, transcript.fetch)
             
             # Join all subtitle parts into one text
-            # The original implementation simply joined with spaces, which could break sentences
-            # This updated version preserves sentence structure better
             subtitle_text = self._construct_transcript_text(subtitle_data)
             
             logger.info(f"Got subtitles with length {len(subtitle_text)} characters")
@@ -155,6 +178,26 @@ class YouTubeProcessor:
             
         except Exception as e:
             logger.error(f"Error getting subtitles: {str(e)}", exc_info=True)
+            
+            # Final fallback: Try direct API request for manual captions
+            try:
+                logger.info("Attempting fallback: Direct subtitle request")
+                # For the fallback, we'll try all provided languages directly
+                for lang in languages:
+                    try:
+                        # Run the synchronous get_transcript call in a thread pool
+                        direct_data = await loop.run_in_executor(
+                            None, lambda: YouTubeTranscriptApi.get_transcript(video_id, languages=[lang])
+                        )
+                        if direct_data:
+                            logger.info(f"Fallback successful: Got subtitles in {lang}")
+                            return self._construct_transcript_text(direct_data)
+                    except Exception:
+                        continue
+            except Exception as fallback_e:
+                logger.error(f"Fallback failed: {str(fallback_e)}")
+            
+            # If we get here, all attempts failed
             raise Exception(f"Error getting subtitles: {str(e)}")
     
     def _construct_transcript_text(self, subtitle_data: List[dict]) -> str:
@@ -256,58 +299,52 @@ class YouTubeProcessor:
         logger.info(f"Split text into {len(final_chunks)} chunks")
         return final_chunks
     
-    async def process_video(self, url: str, languages: List[str] = None) -> Tuple[Optional[str], Optional[str]]:
+    async def process_video(self, url: str, languages: List[str] = None) -> tuple:
         """
-        Processes a YouTube video to get its title and transcript.
+        Process a YouTube video by extracting its title and transcript.
         
         Args:
-            url: YouTube video URL
-            languages: List of preferred languages for subtitles
-            
+            url (str): YouTube video URL
+            languages (List[str], optional): Preferred languages for subtitles. Defaults to ['ru', 'en'].
+        
         Returns:
-            Tuple[Optional[str], Optional[str]]: (video title, transcript) or (None, None) on error
+            tuple: (video_title, transcript) or (None, None) in case of errors
         """
+        if languages is None:
+            languages = ['ru', 'en']
+        
+        logger.info(f"Processing video: {url}")
+        logger.info(f"Using languages for subtitles: {', '.join(languages)}")
+        
         try:
-            logger.info(f"Processing video URL: {url}")
-            
-            # Use provided languages or default
-            pref_languages = languages or ['ru', 'en']
-            logger.info(f"Using languages for subtitles: {pref_languages}")
-            
-            # Extract video ID from URL
             video_id = await self.extract_video_id(url)
-            if not video_id:
-                logger.error(f"Could not extract video ID from URL: {url}")
-                return None, None
-            
             logger.info(f"Extracted video ID: {video_id}")
+        except ValueError as e:
+            logger.error(f"Error extracting video ID: {str(e)}")
+            return None, None
+        
+        try:
+            # Get video title
+            video_info = await self.get_video_info(video_id)
+            video_title = video_info['title']
             
-            # Get video info (string with title)
-            video_title = await self.get_video_info(video_id)
-            if not video_title:
-                logger.error(f"Could not get video info for ID: {video_id}")
+            # Get video transcript
+            transcript = await self.get_subtitles(video_id, languages)
+            
+            if transcript:
+                logger.info(f"Got transcript, length: {len(transcript)} characters")
+                if len(transcript) > 0:
+                    preview = transcript[:200] + "..." if len(transcript) > 200 else transcript
+                    logger.info(f"Transcript preview: {preview}")
+                
+                if len(transcript) > 10000:
+                    logger.info("Long subtitles detected (>10k chars)")
+                
+                return video_title, transcript
+            else:
+                logger.warning("Failed to get transcript")
                 return None, None
-            
-            logger.info(f"Got video info: '{video_title}' (ID: {video_id})")
-            
-            # Get subtitles with specified preferred languages
-            transcript = await self.get_subtitles(video_id, pref_languages)
-            if not transcript:
-                logger.error(f"Could not get subtitles for video: {video_title}")
-                return video_title, None
-            
-            # Log transcript length and preview
-            transcript_length = len(transcript)
-            preview = transcript[:200].replace('\n', ' ').strip() + '...'
-            
-            logger.info(f"Got subtitles for video. Text length: {transcript_length} characters")
-            logger.debug(f"Subtitle preview: {preview}")
-            
-            if transcript_length > 10000:
-                logger.info(f"Long subtitles ({transcript_length} characters). This is normal for a long video.")
-            
-            return video_title, transcript
-            
+        
         except Exception as e:
-            logger.exception(f"Error processing video {url}: {str(e)}")
+            logger.error(f"Error processing video: {str(e)}")
             return None, None 
