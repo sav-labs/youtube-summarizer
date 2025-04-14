@@ -3,6 +3,7 @@ AI Agent for the YouTube Summarizer Bot.
 Handles OpenAI API interactions for various AI tasks.
 """
 import asyncio
+import os
 from typing import List, Optional, Dict, Any
 from openai import AsyncOpenAI
 from loguru import logger
@@ -17,7 +18,13 @@ class AIAgent:
     def __init__(self):
         """
         Initializes the AI Agent with OpenAI client.
+        
+        Note: If proxy settings are needed, they should be set as environment variables:
+        - HTTPS_PROXY: https://your-proxy:port
+        - HTTP_PROXY: http://your-proxy:port
         """
+        # In the current OpenAI SDK version, proxies are set through environment variables
+        # rather than through the client constructor
         self.client = AsyncOpenAI(api_key=OPENAI_API_KEY)
         logger.info("AI Agent initialized with OpenAI client")
     
