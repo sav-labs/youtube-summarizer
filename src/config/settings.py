@@ -33,7 +33,7 @@ LOGGING_LEVEL = LOG_LEVEL_MAP.get(LOG_LEVEL, logging.INFO)
 MAX_MESSAGE_LENGTH = 4096
 
 # Model settings
-DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "gpt-3.5-turbo")
+DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "gpt-4.1-nano")
 
 # Default preferences
 DEFAULT_LANGUAGES = ['ru', 'en']
@@ -48,3 +48,19 @@ UNLIMITED_REQUESTS = -1    # Value indicating unlimited requests
 # Text chunk settings
 DEFAULT_CHUNK_SIZE = 2000  # Default size for text chunking
 LARGE_CONTEXT_CHUNK_SIZE = 6000  # Size for large context models 
+
+# Model context window sizes (in chars, approximation)
+MODEL_CONTEXT_LIMITS = {
+    "gpt-3.5-turbo": 4000,
+    "gpt-3.5-turbo-16k": 16000,
+    "gpt-4": 8000,
+    "gpt-4-32k": 32000,
+    "gpt-4-turbo": 128000,
+    "gpt-4o": 128000,
+    "gpt-4o-mini": 128000,
+    "gpt-4.1-nano": 1000000,   # 1 million context window
+    "gpt-4.1-preview": 1000000
+}
+
+# Default context window if model not found in the above mapping
+DEFAULT_CONTEXT_WINDOW = 4000 

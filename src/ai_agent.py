@@ -10,7 +10,11 @@ from typing import List, Optional, Dict, Any
 from openai import AsyncOpenAI
 import httpx
 from loguru import logger
-from src.config.settings import OPENAI_API_KEY
+from src.config.settings import (
+    OPENAI_API_KEY, 
+    MODEL_CONTEXT_LIMITS,
+    DEFAULT_CONTEXT_WINDOW
+)
 from src.config.prompts import (
     SYSTEM_PROMPTS, SYSTEM_PROMPTS_CONFIG, SUMMARIZE_PROMPT, COMBINE_SUMMARIES_PROMPT, 
     ERROR_RESPONSE_PROMPT, UNKNOWN_MESSAGE_PROMPT, ACCESS_REQUEST_ADMIN_PROMPT,
@@ -93,6 +97,24 @@ class AIAgent:
         except Exception as e:
             logger.error(f"Error writing cache: {e}")
     
+    def get_model_context_limit(self, model: str) -> int:
+        """
+        Get the context window limit for a specific model.
+        
+        Args:
+            model: Model name
+            
+        Returns:
+            int: Context window size in characters
+        """
+        for model_key, context_limit in MODEL_CONTEXT_LIMITS.items():
+            if model.lower().startswith(model_key.lower()):
+                return context_limit
+        
+        # Return default if model not found
+        logger.warning(f"No context limit found for model {model}, using default {DEFAULT_CONTEXT_WINDOW}")
+        return DEFAULT_CONTEXT_WINDOW
+    
     async def list_models(self) -> List[str]:
         """
         List available OpenAI models.
@@ -115,7 +137,8 @@ class AIAgent:
                 "gpt-4",
                 "gpt-4-turbo",
                 "gpt-4o",
-                "gpt-4o-mini"
+                "gpt-4o-mini",
+                "gpt-4.1-nano"
             ]
             logger.info(f"Using fallback model list: {fallback_models}")
             return fallback_models
@@ -131,10 +154,10 @@ class AIAgent:
             str: Default model for the prompt type
         """
         try:
-            return SYSTEM_PROMPTS_CONFIG.get(prompt_type, {}).get("model", "gpt-3.5-turbo")
+            return SYSTEM_PROMPTS_CONFIG.get(prompt_type, {}).get("model", "gpt-4.1-nano")
         except Exception as e:
             logger.error(f"Error getting default model for {prompt_type}: {e}")
-            return "gpt-3.5-turbo"
+            return "gpt-4.1-nano"
     
     async def update_prompt_model(self, prompt_type: str, model: str) -> bool:
         """
@@ -188,6 +211,9 @@ class AIAgent:
         try:
             logger.info(f"Summarizing text with length {len(text)} using model {model}")
             
+            # Get appropriate token limit based on model
+            max_tokens = 1000
+            
             response = await self.client.chat.completions.create(
                 model=model,
                 messages=[
@@ -195,7 +221,7 @@ class AIAgent:
                     {"role": "user", "content": SUMMARIZE_PROMPT.format(title=title, text=text)}
                 ],
                 temperature=0.5,
-                max_tokens=1000
+                max_tokens=max_tokens
             )
             
             summary = response.choices[0].message.content.strip()

@@ -7,7 +7,13 @@ import time
 from typing import List, Optional
 from loguru import logger
 from src.ai_agent import AIAgent
-from src.config.settings import DEFAULT_CHUNK_SIZE, LARGE_CONTEXT_CHUNK_SIZE, DEFAULT_MODEL
+from src.config.settings import (
+    DEFAULT_CHUNK_SIZE, 
+    LARGE_CONTEXT_CHUNK_SIZE, 
+    DEFAULT_MODEL,
+    MODEL_CONTEXT_LIMITS,
+    DEFAULT_CONTEXT_WINDOW
+)
 
 class Summarizer:
     """
@@ -19,7 +25,7 @@ class Summarizer:
         """
         self.ai_agent = AIAgent()
         self.model = DEFAULT_MODEL
-        self.chunk_size = DEFAULT_CHUNK_SIZE
+        self.chunk_size = self.get_optimal_chunk_size(self.model)
         logger.info(f"Summarizer initialized with default model: {self.model}, chunk size: {self.chunk_size}")
     
     async def list_available_models(self) -> List[str]:
@@ -42,7 +48,8 @@ class Summarizer:
                 "gpt-4",
                 "gpt-4-turbo",
                 "gpt-4o",
-                "gpt-4o-mini"
+                "gpt-4o-mini",
+                "gpt-4.1-nano"
             ]
             logger.info(f"Using fallback model list: {models}")
             return models
@@ -57,6 +64,15 @@ class Summarizer:
         Returns:
             int: Optimal chunk size in characters
         """
+        # Use the explicit context limits from settings if available
+        for model_key, context_limit in MODEL_CONTEXT_LIMITS.items():
+            if model.lower().startswith(model_key.lower()):
+                # Use 70% of context window for input (leaving room for prompt and response)
+                chunk_size = int(context_limit * 0.7)
+                logger.info(f"Using context limit of {chunk_size} chars for model {model} (based on {model_key})")
+                return chunk_size
+        
+        # Fallback logic for models not in our explicit mapping
         if any(marker in model.lower() for marker in ["32k", "128k"]):
             return 12000  # For models with very large context windows
         elif any(marker in model.lower() for marker in ["16k", "turbo", "preview"]):
@@ -79,7 +95,7 @@ class Summarizer:
             List[str]: List of text chunks
         """
         if chunk_size is None:
-            chunk_size = self.chunk_size
+            chunk_size = self.get_optimal_chunk_size(self.model)
             
         # If text is short enough, return as is
         if len(text) <= chunk_size:
@@ -181,6 +197,7 @@ class Summarizer:
         
         # Determine optimal chunk size for the selected model
         chunk_size = self.get_optimal_chunk_size(model_to_use)
+        logger.info(f"Using chunk size of {chunk_size} characters for model {model_to_use}")
         
         # If text is too long for a single request, split it
         if len(text) > chunk_size:
