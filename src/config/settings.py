@@ -51,15 +51,16 @@ LARGE_CONTEXT_CHUNK_SIZE = 6000  # Size for large context models
 
 # Model context window sizes (in chars, approximation)
 MODEL_CONTEXT_LIMITS = {
-    "gpt-3.5-turbo": 4000,
-    "gpt-3.5-turbo-16k": 16000,
-    "gpt-4": 8000,
-    "gpt-4-32k": 32000,
+    # Place specific models and longer prefixes first to prevent matching issues
+    "gpt-4.1-nano": 1000000,   # 1 million context window  
+    "gpt-4.1-preview": 1000000,
+    "gpt-4-32k": 32000,        # Longer prefixes before shorter ones
     "gpt-4-turbo": 128000,
-    "gpt-4o": 128000,
     "gpt-4o-mini": 128000,
-    "gpt-4.1-nano": 1000000,   # 1 million context window
-    "gpt-4.1-preview": 1000000
+    "gpt-4o": 128000,
+    "gpt-3.5-turbo-16k": 16000,
+    "gpt-4": 8000,             # Shorter prefixes last
+    "gpt-3.5-turbo": 4000
 }
 
 # Default context window if model not found in the above mapping

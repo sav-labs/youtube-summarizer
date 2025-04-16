@@ -107,7 +107,16 @@ class AIAgent:
         Returns:
             int: Context window size in characters
         """
+        # Exact match for gpt-4.1-nano to ensure it doesn't match with gpt-4
+        if "gpt-4.1-nano" in model.lower():
+            return MODEL_CONTEXT_LIMITS["gpt-4.1-nano"]
+        
+        # Check other models
         for model_key, context_limit in MODEL_CONTEXT_LIMITS.items():
+            # Skip gpt-4.1-nano since we already checked it
+            if model_key == "gpt-4.1-nano":
+                continue
+                
             if model.lower().startswith(model_key.lower()):
                 return context_limit
         

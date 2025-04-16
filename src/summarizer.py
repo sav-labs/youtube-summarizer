@@ -64,8 +64,19 @@ class Summarizer:
         Returns:
             int: Optimal chunk size in characters
         """
+        # Specific check for nano models to prevent them from matching with base models
+        if "gpt-4.1-nano" in model.lower():
+            # Use 70% of context window for input (leaving room for prompt and response)
+            chunk_size = int(MODEL_CONTEXT_LIMITS["gpt-4.1-nano"] * 0.7)
+            logger.info(f"Using context limit of {chunk_size} chars for model {model} (nano model)")
+            return chunk_size
+            
         # Use the explicit context limits from settings if available
         for model_key, context_limit in MODEL_CONTEXT_LIMITS.items():
+            # Skip the nano model as we've already checked it
+            if "nano" in model_key.lower():
+                continue
+                
             if model.lower().startswith(model_key.lower()):
                 # Use 70% of context window for input (leaving room for prompt and response)
                 chunk_size = int(context_limit * 0.7)
