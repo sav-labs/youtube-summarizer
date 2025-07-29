@@ -8,7 +8,6 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, BotCommand
-from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from loguru import logger
 
@@ -36,10 +35,7 @@ class TelegramBot:
     """
     def __init__(self):
         """Initialize the Telegram bot with all necessary components."""
-        self.bot = Bot(
-            token=TELEGRAM_BOT_TOKEN,
-            default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN)
-        )
+        self.bot = Bot(token=TELEGRAM_BOT_TOKEN, parse_mode=ParseMode.MARKDOWN)
         self.dp = Dispatcher()
         self.user_manager = UserManager()
         self.youtube_processor = YouTubeProcessor()
