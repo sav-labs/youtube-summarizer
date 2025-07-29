@@ -814,7 +814,6 @@ class TelegramBot:
             
             # Format final response
             final_response = (
-                f"🎥 **{video_title}**\n\n"
                 f"{summary}\n\n"
                 f"🔗 [Ссылка на видео]({url})"
             )
