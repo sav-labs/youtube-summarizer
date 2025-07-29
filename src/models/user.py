@@ -20,6 +20,8 @@ class User:
     is_admin: bool = False
     is_approved: bool = False
     model: Optional[str] = None
+    forced_model: Optional[str] = None  # Принудительная модель от админа
+    is_model_locked: bool = False  # Заблокирована ли смена модели
     languages: List[str] = field(default_factory=lambda: DEFAULT_LANGUAGES.copy())
     remaining_requests: int = DEFAULT_USER_REQUESTS
     created_at: datetime = field(default_factory=datetime.now)
@@ -40,6 +42,37 @@ class User:
     def has_unlimited_requests(self) -> bool:
         """Returns True if the user has unlimited requests"""
         return self.remaining_requests == UNLIMITED_REQUESTS or self.is_admin
+    
+    def get_effective_model(self) -> Optional[str]:
+        """
+        Returns the effective model for the user.
+        If forced_model is set, returns it regardless of user preference.
+        Otherwise, returns user's selected model.
+        """
+        if self.forced_model:
+            return self.forced_model
+        return self.model
+    
+    def can_change_model(self) -> bool:
+        """
+        Returns True if the user can change their model.
+        Admins can always change, but other users can't if model is locked.
+        """
+        if self.is_admin:
+            return True
+        return not self.is_model_locked
+    
+    def set_forced_model(self, model: Optional[str], locked: bool = False) -> None:
+        """
+        Sets a forced model for the user (admin only operation).
+        
+        Args:
+            model: Model to force, or None to remove forced model
+            locked: Whether to lock model changes for this user
+        """
+        self.forced_model = model
+        self.is_model_locked = locked
+        self.updated_at = datetime.now()
     
     def has_access(self) -> bool:
         """Returns True if the user is allowed to use the bot"""
@@ -82,6 +115,8 @@ class User:
             "is_admin": self.is_admin,
             "is_approved": self.is_approved,
             "model": self.model,
+            "forced_model": self.forced_model,
+            "is_model_locked": self.is_model_locked,
             "languages": self.languages,
             "remaining_requests": self.remaining_requests,
             "created_at": self.created_at.isoformat(),

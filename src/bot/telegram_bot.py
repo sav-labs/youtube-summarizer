@@ -26,7 +26,9 @@ from .keyboards import (
     create_access_request_keyboard,
     create_admin_notification_keyboard,
     create_user_list_keyboard,
-    create_user_management_keyboard
+    create_user_management_keyboard,
+    create_admin_model_selection_keyboard,
+    create_model_lock_options_keyboard
 )
 
 class TelegramBot:
@@ -271,20 +273,41 @@ class TelegramBot:
         
         try:
             models = await self.summarizer.list_available_models()
-            keyboard = create_models_keyboard(models, user.model)
             
-            model_text = (
-                "🤖 *Выбор модели ИИ для анализа видео*\n\n"
-                f"Текущая модель: *{user.model or 'По умолчанию'}*\n\n"
-                "📊 *Описание моделей:*\n"
-                "• GPT-4o - Самая современная модель\n"
-                "• GPT-4o-mini - Быстрая и эффективная\n"
-                "• GPT-4 - Высокое качество анализа\n"
-                "• GPT-3.5 - Базовая модель\n\n"
-                "Выберите модель из списка ниже:"
-            )
-            
-            await message.answer(model_text, reply_markup=keyboard)
+            # Check if model changes are blocked
+            if not user.can_change_model():
+                # Model is locked - show read-only info
+                effective_model = user.get_effective_model() or 'По умолчанию'
+                forced_model = user.forced_model or 'По умолчанию'
+                
+                model_text = (
+                    "🔒 *Модель заблокирована администратором*\n\n"
+                    f"Установленная модель: *{forced_model}* 🔒\n"
+                    f"Фактически используемая: *{effective_model}*\n\n"
+                    "❌ Вы не можете изменить модель.\n"
+                    "Обратитесь к администратору если нужна другая модель."
+                )
+                
+                await message.answer(model_text)
+            else:
+                # Model changes allowed - show selection
+                keyboard = create_models_keyboard(models, user.model)
+                effective_model = user.get_effective_model() or 'По умолчанию'
+                user_model = user.model or 'По умолчанию'
+                
+                model_text = (
+                    "🤖 *Выбор модели ИИ для анализа видео*\n\n"
+                    f"Выбранная модель: *{user_model}*\n"
+                    f"Используемая модель: *{effective_model}*\n\n"
+                    "📊 *Описание моделей:*\n"
+                    "• GPT-4o - Самая современная модель\n"
+                    "• GPT-4o-mini - Быстрая и эффективная\n"
+                    "• GPT-4 - Высокое качество анализа\n"
+                    "• GPT-3.5 - Базовая модель\n\n"
+                    "Выберите модель из списка ниже:"
+                )
+                
+                await message.answer(model_text, reply_markup=keyboard)
             
         except Exception as e:
             logger.error(f"Error getting models: {e}")
@@ -427,6 +450,22 @@ class TelegramBot:
                 await self.handle_user_list_page(callback, user)
             elif data.startswith("revoke_access:"):
                 await self.handle_revoke_access(callback, user)
+            elif data.startswith("set_user_model:"):
+                await self.handle_set_user_model(callback, user)
+            elif data.startswith("toggle_model_lock:"):
+                await self.handle_toggle_model_lock(callback, user)
+            elif data.startswith("clear_forced_model:"):
+                await self.handle_clear_forced_model(callback, user)
+            elif data.startswith("admin_set_model:"):
+                await self.handle_admin_set_model(callback, user)
+            elif data.startswith("admin_set_model_locked:"):
+                await self.handle_admin_set_model_locked(callback, user)
+            elif data.startswith("lock_user_model:"):
+                await self.handle_lock_user_model(callback, user)
+            elif data.startswith("unlock_user_model:"):
+                await self.handle_unlock_user_model(callback, user)
+            elif data.startswith("admin_set_model_lock:"):
+                await self.handle_admin_set_model_lock(callback, user)
             elif data == "noop":
                 # No operation - for pagination indicators
                 await callback.answer()
@@ -440,6 +479,12 @@ class TelegramBot:
 
     async def handle_set_model(self, callback: CallbackQuery, user):
         """Handle model selection callback."""
+        # Check if user can change model
+        if not user.can_change_model():
+            forced_model = user.forced_model or 'По умолчанию'
+            await callback.answer(f"🔒 Смена модели заблокирована администратором.\nТекущая модель: {forced_model}")
+            return
+        
         model = callback.data.split(":", 1)[1]
         
         # Update user model
@@ -673,18 +718,28 @@ class TelegramBot:
             remaining = "♾️ Безлимит" if target_user.has_unlimited_requests else f"{target_user.remaining_requests}"
             status = "✅ Активен" if target_user.has_access() else "❌ Нет доступа"
             
+            # Model information
+            user_model = target_user.model or 'По умолчанию'
+            effective_model = target_user.get_effective_model() or 'По умолчанию'
+            forced_model = target_user.forced_model or 'Не установлена'
+            model_lock = "🔒 Заблокирована" if target_user.is_model_locked else "🔓 Разблокирована"
+            
             user_info_text = (
                 f"👤 *Информация о пользователе*\n\n"
                 f"**ID:** {target_user.user_id}\n"
                 f"**Имя:** {target_user.display_name}\n"
                 f"**Username:** @{target_user.username or 'Не указан'}\n"
                 f"**Статус:** {status}\n"
-                f"**Админ:** {'Да' if target_user.is_admin else 'Нет'}\n"
-                f"**Модель:** {target_user.model or 'По умолчанию'}\n"
-                f"**Языки:** {', '.join(target_user.languages)}\n"
-                f"**Осталось запросов:** {remaining}\n"
-                f"**Регистрация:** {target_user.created_at.strftime('%d.%m.%Y %H:%M')}\n"
-                f"**Последнее обновление:** {target_user.updated_at.strftime('%d.%m.%Y %H:%M')}"
+                f"**Админ:** {'Да' if target_user.is_admin else 'Нет'}\n\n"
+                f"🤖 **Модели:**\n"
+                f"• Выбранная пользователем: {user_model}\n"
+                f"• Принудительная (админ): {forced_model}\n"
+                f"• Фактически используемая: {effective_model}\n"
+                f"• Блокировка изменений: {model_lock}\n\n"
+                f"🌐 **Языки:** {', '.join(target_user.languages)}\n"
+                f"📊 **Осталось запросов:** {remaining}\n"
+                f"📅 **Регистрация:** {target_user.created_at.strftime('%d.%m.%Y %H:%M')}\n"
+                f"🕐 **Последнее обновление:** {target_user.updated_at.strftime('%d.%m.%Y %H:%M')}"
             )
             
             keyboard = create_user_management_keyboard(target_user_id)
@@ -755,6 +810,279 @@ class TelegramBot:
             logger.error(f"Error revoking access: {e}")
             await callback.answer("❌ Ошибка при отзыве доступа")
 
+    async def handle_set_user_model(self, callback: CallbackQuery, user):
+        """Handle admin setting model for user."""
+        if not user.is_admin:
+            await callback.answer("⛔ Недостаточно прав")
+            return
+        
+        try:
+            target_user_id = int(callback.data.split(":", 1)[1])
+            target_user = self.user_manager.get_user(target_user_id)
+            
+            if not target_user:
+                await callback.answer("❌ Пользователь не найден")
+                return
+            
+            # Get available models
+            models = await self.summarizer.list_available_models()
+            keyboard = create_admin_model_selection_keyboard(target_user_id, models)
+            
+            current_model = target_user.get_effective_model() or "По умолчанию"
+            lock_status = "🔒 Заблокирована" if target_user.is_model_locked else "🔓 Разблокирована"
+            
+            text = (
+                f"🤖 *Управление моделью пользователя*\n\n"
+                f"**Пользователь:** {target_user.display_name}\n"
+                f"**Текущая модель:** {current_model}\n"
+                f"**Принудительная модель:** {target_user.forced_model or 'Не установлена'}\n"
+                f"**Блокировка:** {lock_status}\n\n"
+                f"Выберите модель для установки:"
+            )
+            
+            await callback.message.edit_text(text, reply_markup=keyboard)
+            
+        except Exception as e:
+            logger.error(f"Error setting user model: {e}")
+            await callback.answer("❌ Ошибка при управлении моделью")
+
+    async def handle_toggle_model_lock(self, callback: CallbackQuery, user):
+        """Handle admin toggling model lock for user."""
+        if not user.is_admin:
+            await callback.answer("⛔ Недостаточно прав")
+            return
+        
+        try:
+            target_user_id = int(callback.data.split(":", 1)[1])
+            target_user = self.user_manager.get_user(target_user_id)
+            
+            if not target_user:
+                await callback.answer("❌ Пользователь не найден")
+                return
+            
+            keyboard = create_model_lock_options_keyboard(target_user_id)
+            lock_status = "🔒 Заблокирована" if target_user.is_model_locked else "🔓 Разблокирована"
+            
+            text = (
+                f"🔐 *Управление блокировкой модели*\n\n"
+                f"**Пользователь:** {target_user.display_name}\n"
+                f"**Текущий статус:** {lock_status}\n"
+                f"**Принудительная модель:** {target_user.forced_model or 'Не установлена'}\n\n"
+                f"Выберите действие:"
+            )
+            
+            await callback.message.edit_text(text, reply_markup=keyboard)
+            
+        except Exception as e:
+            logger.error(f"Error toggling model lock: {e}")
+            await callback.answer("❌ Ошибка при управлении блокировкой")
+
+    async def handle_clear_forced_model(self, callback: CallbackQuery, user):
+        """Handle admin clearing forced model for user."""
+        if not user.is_admin:
+            await callback.answer("⛔ Недостаточно прав")
+            return
+        
+        try:
+            target_user_id = int(callback.data.split(":", 1)[1])
+            target_user = self.user_manager.get_user(target_user_id)
+            
+            if not target_user:
+                await callback.answer("❌ Пользователь не найден")
+                return
+            
+            # Clear forced model
+            target_user.set_forced_model(None, False)
+            self.user_manager.save_user(target_user)
+            
+            await callback.answer("✅ Принудительная модель сброшена")
+            
+            # Return to user info
+            await self.handle_user_info(callback, user)
+            
+            logger.info(f"Admin {user.display_name} cleared forced model for user {target_user.display_name}")
+            
+        except Exception as e:
+            logger.error(f"Error clearing forced model: {e}")
+            await callback.answer("❌ Ошибка при сбросе модели")
+
+    async def handle_admin_set_model(self, callback: CallbackQuery, user):
+        """Handle admin setting specific model for user."""
+        if not user.is_admin:
+            await callback.answer("⛔ Недостаточно прав")
+            return
+        
+        try:
+            parts = callback.data.split(":", 2)
+            target_user_id = int(parts[1])
+            model = parts[2]
+            
+            target_user = self.user_manager.get_user(target_user_id)
+            
+            if not target_user:
+                await callback.answer("❌ Пользователь не найден")
+                return
+            
+            # Set forced model without locking
+            target_user.set_forced_model(model, target_user.is_model_locked)
+            self.user_manager.save_user(target_user)
+            
+            await callback.answer(f"✅ Модель {model} установлена")
+            
+            # Return to user info
+            await self.handle_user_info(callback, user)
+            
+            logger.info(f"Admin {user.display_name} set model {model} for user {target_user.display_name}")
+            
+        except Exception as e:
+            logger.error(f"Error setting model: {e}")
+            await callback.answer("❌ Ошибка при установке модели")
+
+    async def handle_admin_set_model_locked(self, callback: CallbackQuery, user):
+        """Handle admin setting model with lock for user."""
+        if not user.is_admin:
+            await callback.answer("⛔ Недостаточно прав")
+            return
+        
+        try:
+            target_user_id = int(callback.data.split(":", 1)[1])
+            
+            # Get available models
+            models = await self.summarizer.list_available_models()
+            
+            # Create special keyboard for locked model selection
+            keyboard_buttons = []
+            
+            # Add model buttons (2 per row) with lock indication
+            for i in range(0, len(models), 2):
+                row = []
+                for j in range(2):
+                    if i + j < len(models):
+                        model = models[i + j]
+                        display_name = model.replace("gpt-", "GPT-").replace("-", " ").title()
+                        
+                        button = types.InlineKeyboardButton(
+                            text=f"🔒 {display_name}",
+                            callback_data=f"admin_set_model_lock:{target_user_id}:{model}"
+                        )
+                        row.append(button)
+                keyboard_buttons.append(row)
+            
+            # Add back button
+            back_row = [
+                types.InlineKeyboardButton(
+                    text="⬅️ Назад к управлению",
+                    callback_data=f"user_info:{target_user_id}"
+                )
+            ]
+            keyboard_buttons.append(back_row)
+            
+            keyboard = types.InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+            
+            text = (
+                f"🔒 *Установка модели с блокировкой*\n\n"
+                f"Выберите модель, которая будет принудительно установлена "
+                f"и заблокирована для изменения пользователем:"
+            )
+            
+            await callback.message.edit_text(text, reply_markup=keyboard)
+            
+        except Exception as e:
+            logger.error(f"Error showing locked model selection: {e}")
+            await callback.answer("❌ Ошибка при выборе модели")
+
+    async def handle_lock_user_model(self, callback: CallbackQuery, user):
+        """Handle admin locking user's model."""
+        if not user.is_admin:
+            await callback.answer("⛔ Недостаточно прав")
+            return
+        
+        try:
+            target_user_id = int(callback.data.split(":", 1)[1])
+            target_user = self.user_manager.get_user(target_user_id)
+            
+            if not target_user:
+                await callback.answer("❌ Пользователь не найден")
+                return
+            
+            # Lock model changes
+            target_user.is_model_locked = True
+            target_user.updated_at = datetime.now()
+            self.user_manager.save_user(target_user)
+            
+            await callback.answer("🔒 Смена модели заблокирована")
+            
+            # Return to user info
+            await self.handle_user_info(callback, user)
+            
+            logger.info(f"Admin {user.display_name} locked model for user {target_user.display_name}")
+            
+        except Exception as e:
+            logger.error(f"Error locking user model: {e}")
+            await callback.answer("❌ Ошибка при блокировке модели")
+
+    async def handle_unlock_user_model(self, callback: CallbackQuery, user):
+        """Handle admin unlocking user's model."""
+        if not user.is_admin:
+            await callback.answer("⛔ Недостаточно прав")
+            return
+        
+        try:
+            target_user_id = int(callback.data.split(":", 1)[1])
+            target_user = self.user_manager.get_user(target_user_id)
+            
+            if not target_user:
+                await callback.answer("❌ Пользователь не найден")
+                return
+            
+            # Unlock model changes
+            target_user.is_model_locked = False
+            target_user.updated_at = datetime.now()
+            self.user_manager.save_user(target_user)
+            
+            await callback.answer("🔓 Смена модели разблокирована")
+            
+            # Return to user info
+            await self.handle_user_info(callback, user)
+            
+            logger.info(f"Admin {user.display_name} unlocked model for user {target_user.display_name}")
+            
+        except Exception as e:
+            logger.error(f"Error unlocking user model: {e}")
+            await callback.answer("❌ Ошибка при разблокировке модели")
+
+    async def handle_admin_set_model_lock(self, callback: CallbackQuery, user):
+        """Handle admin setting model with lock for user."""
+        if not user.is_admin:
+            await callback.answer("⛔ Недостаточно прав")
+            return
+        
+        try:
+            parts = callback.data.split(":", 2)
+            target_user_id = int(parts[1])
+            model = parts[2]
+            
+            target_user = self.user_manager.get_user(target_user_id)
+            
+            if not target_user:
+                await callback.answer("❌ Пользователь не найден")
+                return
+            
+            # Set forced model with lock
+            target_user.set_forced_model(model, True)
+            self.user_manager.save_user(target_user)
+            
+            await callback.answer(f"🔒 Модель {model} установлена и заблокирована")
+            
+            # Return to user info
+            await self.handle_user_info(callback, user)
+            
+            logger.info(f"Admin {user.display_name} set locked model {model} for user {target_user.display_name}")
+            
+        except Exception as e:
+            logger.error(f"Error setting locked model: {e}")
+            await callback.answer("❌ Ошибка при установке заблокированной модели")
+
     async def process_youtube_link(self, message: Message):
         """
         Process YouTube link sent by user.
@@ -786,7 +1114,8 @@ class TelegramBot:
         url = message.text.strip()
         
         logger.info(f"User {user.display_name} (ID: {user_id}) sent YouTube link: {url}")
-        logger.info(f"Using model {user.model or 'default'} and languages {user.languages} for user {user_id}")
+        effective_model = user.get_effective_model() or 'default'
+        logger.info(f"Using model {effective_model} and languages {user.languages} for user {user_id}")
         
         # Send "processing" message
         processing_msg = await message.answer("🔄 Обрабатываю видео, это может занять некоторое время...")
@@ -797,7 +1126,7 @@ class TelegramBot:
             
             if not video_title or not transcript:
                 # Generate error response
-                error_response = await self.ai_agent.generate_error_response(url, user.model)
+                error_response = await self.ai_agent.generate_error_response(url, user.get_effective_model())
                 await processing_msg.edit_text(error_response)
                 return
             
@@ -805,7 +1134,7 @@ class TelegramBot:
             summary = await self.summarizer.summarize(
                 text=transcript,
                 title=video_title,
-                model=user.model
+                model=user.get_effective_model()
             )
             
             if not summary:
@@ -828,7 +1157,7 @@ class TelegramBot:
             
             # Generate error response using AI
             try:
-                error_response = await self.ai_agent.generate_error_response(url, user.model)
+                error_response = await self.ai_agent.generate_error_response(url, user.get_effective_model())
                 await processing_msg.edit_text(error_response)
             except:
                 await processing_msg.edit_text(
@@ -857,7 +1186,7 @@ class TelegramBot:
         
         try:
             # Generate response using AI
-            response = await self.ai_agent.handle_unknown_message(text, user.model)
+            response = await self.ai_agent.handle_unknown_message(text, user.get_effective_model())
             await message.answer(response)
             
         except Exception as e:

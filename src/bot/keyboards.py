@@ -341,6 +341,22 @@ def create_user_management_keyboard(user_id: int) -> InlineKeyboardMarkup:
         callback_data=f"revoke_access:{user_id}"
     )
     
+    # Model management buttons
+    set_model = InlineKeyboardButton(
+        text="🤖 Установить модель",
+        callback_data=f"set_user_model:{user_id}"
+    )
+    
+    toggle_model_lock = InlineKeyboardButton(
+        text="🔒 Управление блокировкой модели",
+        callback_data=f"toggle_model_lock:{user_id}"
+    )
+    
+    clear_forced_model = InlineKeyboardButton(
+        text="🗑️ Сбросить принудительную модель",
+        callback_data=f"clear_forced_model:{user_id}"
+    )
+    
     back_to_list = InlineKeyboardButton(
         text="📋 К списку пользователей", 
         callback_data="user_list:0"
@@ -356,8 +372,92 @@ def create_user_management_keyboard(user_id: int) -> InlineKeyboardMarkup:
         [grant_unlimited],
         [grant_requests],
         [revoke_access],
+        [set_model],
+        [toggle_model_lock],
+        [clear_forced_model],
         [back_to_list],
         [back_to_main]
     ])
     
     return keyboard 
+
+def create_admin_model_selection_keyboard(user_id: int, models: List[str]) -> InlineKeyboardMarkup:
+    """
+    Creates a keyboard for admin to select a model for a user.
+    
+    Args:
+        user_id: ID of the user to set model for
+        models: List of available models
+        
+    Returns:
+        InlineKeyboardMarkup: Model selection keyboard for admin
+    """
+    keyboard_buttons = []
+    
+    # Add model buttons (2 per row)
+    for i in range(0, len(models), 2):
+        row = []
+        for j in range(2):
+            if i + j < len(models):
+                model = models[i + j]
+                display_name = model.replace("gpt-", "GPT-").replace("-", " ").title()
+                
+                button = InlineKeyboardButton(
+                    text=display_name,
+                    callback_data=f"admin_set_model:{user_id}:{model}"
+                )
+                row.append(button)
+        keyboard_buttons.append(row)
+    
+    # Add control buttons
+    lock_and_set_row = [
+        InlineKeyboardButton(
+            text="🔒 Заблокировать модель",
+            callback_data=f"admin_set_model_locked:{user_id}"
+        )
+    ]
+    
+    back_row = [
+        InlineKeyboardButton(
+            text="⬅️ Назад к управлению",
+            callback_data=f"user_info:{user_id}"
+        )
+    ]
+    
+    keyboard_buttons.append(lock_and_set_row)
+    keyboard_buttons.append(back_row)
+    
+    return InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+
+def create_model_lock_options_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    """
+    Creates a keyboard for managing model lock options.
+    
+    Args:
+        user_id: ID of the user to manage
+        
+    Returns:
+        InlineKeyboardMarkup: Model lock management keyboard
+    """
+    keyboard_buttons = [
+        [
+            InlineKeyboardButton(
+                text="🔒 Заблокировать смену модели",
+                callback_data=f"lock_user_model:{user_id}"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="🔓 Разблокировать смену модели", 
+                callback_data=f"unlock_user_model:{user_id}"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="⬅️ Назад к управлению",
+                callback_data=f"user_info:{user_id}"
+            )
+        ]
+    ]
+    
+    return InlineKeyboardMarkup(inline_keyboard=keyboard_buttons) 
