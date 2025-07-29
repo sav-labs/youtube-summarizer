@@ -238,12 +238,12 @@ def create_admin_notification_keyboard(user_id: int) -> InlineKeyboardMarkup:
     
     return keyboard
 
-def create_user_list_keyboard(user_ids: List[int], page: int = 0, page_size: int = 5) -> InlineKeyboardMarkup:
+def create_user_list_keyboard(users: List, page: int = 0, page_size: int = 5) -> InlineKeyboardMarkup:
     """
     Creates a keyboard for user list with pagination.
     
     Args:
-        user_ids: List of user IDs
+        users: List of User objects
         page: Current page number
         page_size: Number of users per page
         
@@ -251,20 +251,25 @@ def create_user_list_keyboard(user_ids: List[int], page: int = 0, page_size: int
         InlineKeyboardMarkup: User list keyboard
     """
     # Calculate pagination
-    total_pages = (len(user_ids) - 1) // page_size + 1
+    total_pages = (len(users) - 1) // page_size + 1
     start_idx = page * page_size
-    end_idx = min(start_idx + page_size, len(user_ids))
-    current_page_users = user_ids[start_idx:end_idx]
+    end_idx = min(start_idx + page_size, len(users))
+    current_page_users = users[start_idx:end_idx]
     
     # Create buttons list
     keyboard_buttons = []
     
     # Add user buttons
-    for user_id in current_page_users:
+    for user in current_page_users:
+        # Show username or display name instead of just ID
+        display_text = f"👤 {user.display_name}"
+        if user.username and user.username != user.display_name:
+            display_text += f" (@{user.username})"
+        
         keyboard_buttons.append([
             InlineKeyboardButton(
-                text=f"👤 Пользователь {user_id}", 
-                callback_data=f"user_info:{user_id}"
+                text=display_text, 
+                callback_data=f"user_info:{user.user_id}"
             )
         ])
     
