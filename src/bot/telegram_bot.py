@@ -802,7 +802,7 @@ class TelegramBot:
                 return
             
             # Generate summary
-            summary = await self.summarizer.summarize_text(
+            summary = await self.summarizer.summarize(
                 text=transcript,
                 title=video_title,
                 model=user.model
