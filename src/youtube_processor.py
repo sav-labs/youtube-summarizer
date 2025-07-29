@@ -453,26 +453,36 @@ class YouTubeProcessor:
             video_info = await self.get_video_info(video_id)
             video_title = video_info['title']
             
-            # Get video transcript
-            transcript = await self.get_subtitles(video_id, languages)
+            # Try to get video transcript - FIRST try standard API
+            transcript = None
             
-            if transcript:
-                logger.info(f"Got transcript, length: {len(transcript)} characters")
-                if len(transcript) > 0:
-                    preview = transcript[:200] + "..." if len(transcript) > 200 else transcript
-                    logger.info(f"Transcript preview: {preview}")
-                
-                if len(transcript) > 10000:
-                    logger.info("Long subtitles detected (>10k chars)")
-                
-                return video_title, transcript
-            else:
-                logger.warning("Failed to get transcript")
-                return None, None
+            try:
+                logger.info("Trying standard YouTube API for subtitles...")
+                transcript = await self.get_subtitles(video_id, languages)
+                if transcript and len(transcript.strip()) >= 10:
+                    logger.info(f"Standard API successful: {len(transcript)} characters")
+                    return video_title, transcript
+            except Exception as api_error:
+                logger.warning(f"Standard API failed: {str(api_error)}")
+            
+            # If standard API failed, immediately try yt-dlp
+            if not transcript:
+                logger.info("Trying yt-dlp fallback immediately...")
+                try:
+                    transcript = await self._get_subtitles_with_ytdlp(video_id, languages)
+                    if transcript and len(transcript.strip()) >= 10:
+                        logger.info(f"yt-dlp successful: {len(transcript)} characters")
+                        return video_title, transcript
+                except Exception as ytdlp_error:
+                    logger.error(f"yt-dlp also failed: {str(ytdlp_error)}")
+            
+            # If both methods failed
+            logger.warning("All subtitle extraction methods failed")
+            return None, None
         
         except Exception as e:
             logger.error(f"Error processing video: {str(e)}")
-            return None, None 
+            return None, None
 
     async def _get_subtitles_with_ytdlp(self, video_id: str, languages: List[str] = None) -> str:
         """
