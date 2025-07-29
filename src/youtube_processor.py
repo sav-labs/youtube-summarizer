@@ -170,6 +170,8 @@ class YouTubeProcessor:
                 try:
                     # Check if language is available
                     available_languages = [t.language_code for t in transcript_list]
+                    logger.debug(f"Available languages: {available_languages}")
+                    
                     if lang in available_languages:
                         transcript = await loop.run_in_executor(
                             None, lambda: transcript_list.find_transcript([lang])
@@ -206,25 +208,75 @@ class YouTubeProcessor:
             
             # Get subtitles as text with validation
             try:
+                logger.debug(f"Fetching subtitle data for language: {used_language}")
                 subtitle_data = await loop.run_in_executor(None, transcript.fetch)
                 
-                # Validate subtitle data
+                # Debug: log subtitle data info
+                logger.debug(f"Received subtitle data type: {type(subtitle_data)}, length: {len(subtitle_data) if subtitle_data else 0}")
+                
+                # Enhanced validation
+                if not subtitle_data:
+                    logger.error("No subtitle data received")
+                    raise Exception("Не получены данные субтитров")
+                
+                if isinstance(subtitle_data, list) and len(subtitle_data) == 0:
+                    logger.error("Empty subtitle data list")
+                    raise Exception("Получен пустой список субтитров")
+                
+                # Check if first item has expected structure
+                if isinstance(subtitle_data, list) and len(subtitle_data) > 0:
+                    first_item = subtitle_data[0]
+                    logger.debug(f"First subtitle item: {first_item}")
+                    
+                    if not isinstance(first_item, dict) or 'text' not in first_item:
+                        logger.error(f"Invalid subtitle item structure: {first_item}")
+                        raise Exception("Некорректная структура данных субтитров")
+                
+                # Validate subtitle data using existing method
                 if not self._validate_subtitle_data(subtitle_data):
-                    logger.error("Invalid subtitle data received")
-                    raise Exception("Получены некорректные данные субтитров")
+                    logger.error("Subtitle data validation failed")
+                    raise Exception("Данные субтитров не прошли валидацию")
                 
                 # Join all subtitle parts into one text
                 subtitle_text = self._construct_transcript_text(subtitle_data)
                 
                 if not subtitle_text or len(subtitle_text.strip()) < 10:
-                    logger.error("Subtitle text is too short or empty")
-                    raise Exception("Полученные субтитры слишком короткие или пустые")
+                    logger.error(f"Subtitle text too short: '{subtitle_text[:100]}...'")
+                    raise Exception("Полученный текст субтитров слишком короткий")
                 
-                logger.info(f"Got subtitles with length {len(subtitle_text)} characters in language {used_language}")
+                logger.info(f"Successfully got subtitles with length {len(subtitle_text)} characters in language {used_language}")
                 return subtitle_text
                 
             except Exception as e:
                 logger.error(f"Error fetching subtitle data: {str(e)}")
+                
+                # Try alternative approach: direct transcript API call
+                logger.info("Trying alternative direct transcript approach...")
+                try:
+                    for lang in languages:
+                        try:
+                            logger.debug(f"Trying direct API for language: {lang}")
+                            direct_data = await loop.run_in_executor(
+                                None, lambda l=lang: YouTubeTranscriptApi.get_transcript(video_id, languages=[l])
+                            )
+                            
+                            if direct_data and len(direct_data) > 0:
+                                logger.info(f"Direct API successful for language: {lang}")
+                                
+                                # Validate and construct text
+                                if self._validate_subtitle_data(direct_data):
+                                    subtitle_text = self._construct_transcript_text(direct_data)
+                                    if subtitle_text and len(subtitle_text.strip()) >= 10:
+                                        logger.info(f"Successfully got subtitles via direct API: {len(subtitle_text)} chars")
+                                        return subtitle_text
+                                
+                        except Exception as direct_e:
+                            logger.debug(f"Direct API failed for {lang}: {str(direct_e)}")
+                            continue
+                            
+                except Exception as alt_e:
+                    logger.error(f"Alternative approach failed: {str(alt_e)}")
+                
                 raise Exception(f"Ошибка при получении текста субтитров: {str(e)}")
             
         except TranscriptsDisabled as e:
@@ -238,29 +290,47 @@ class YouTubeProcessor:
         except Exception as e:
             logger.error(f"Error getting subtitles: {str(e)}")
             
-            # Final fallback: Try direct API request
+            # Final fallback: Try direct API request with all available languages
             try:
-                logger.info("Attempting direct fallback subtitle request")
-                # For the fallback, we'll try all provided languages directly
-                for lang in languages:
-                    try:
-                        direct_data = await loop.run_in_executor(
-                            None, lambda: YouTubeTranscriptApi.get_transcript(video_id, languages=[lang])
-                        )
-                        if direct_data and self._validate_subtitle_data(direct_data):
-                            logger.info(f"Fallback successful: Got subtitles in {lang}")
-                            return self._construct_transcript_text(direct_data)
-                    except Exception:
-                        continue
+                logger.info("Attempting final fallback with all available languages")
+                
+                # Get all available languages
+                try:
+                    transcript_list = await loop.run_in_executor(
+                        None, lambda: YouTubeTranscriptApi.list_transcripts(video_id)
+                    )
+                    all_languages = [t.language_code for t in transcript_list]
+                    logger.debug(f"All available languages: {all_languages}")
+                    
+                    # Try each available language
+                    for lang in all_languages[:5]:  # Limit to first 5 to avoid too many attempts
+                        try:
+                            direct_data = await loop.run_in_executor(
+                                None, lambda l=lang: YouTubeTranscriptApi.get_transcript(video_id, languages=[l])
+                            )
+                            
+                            if direct_data and len(direct_data) > 0:
+                                subtitle_text = self._construct_transcript_text(direct_data)
+                                if subtitle_text and len(subtitle_text.strip()) >= 10:
+                                    logger.info(f"Final fallback successful in language: {lang}")
+                                    return subtitle_text
+                                    
+                        except Exception:
+                            continue
+                            
+                except Exception as final_e:
+                    logger.error(f"Final fallback failed: {str(final_e)}")
+                    
             except Exception as fallback_e:
-                logger.error(f"Fallback failed: {str(fallback_e)}")
+                logger.error(f"All fallbacks failed: {str(fallback_e)}")
             
             # If we get here, all attempts failed
             raise Exception(f"Не удалось получить субтитры для видео. Возможные причины:\n"
-                          f"• Видео не содержит субтитров\n"
-                          f"• Субтитры отключены автором\n"
-                          f"• Технические проблемы с YouTube API\n\n"
-                          f"Попробуйте другое видео с доступными субтитрами.")
+                          f"• Видео содержит субтитры, но они повреждены или недоступны\n"
+                          f"• Субтитры защищены от автоматического извлечения\n"
+                          f"• Технические проблемы с YouTube API\n"
+                          f"• Региональные ограничения\n\n"
+                          f"Попробуйте другое видео или проверьте доступность субтитров вручную.")
     
     def _construct_transcript_text(self, subtitle_data: List[dict]) -> str:
         """
