@@ -4,6 +4,9 @@ Handles fetching transcripts and metadata from YouTube videos.
 """
 import re
 import aiohttp
+import json
+import tempfile
+import os
 from pathlib import Path
 from typing import List, Optional, Tuple
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
@@ -304,11 +307,21 @@ class YouTubeProcessor:
         except Exception as e:
             logger.error(f"Error getting subtitles: {str(e)}")
             
+            # Try yt-dlp as final fallback
+            logger.info("Trying yt-dlp as final fallback")
+            try:
+                ytdlp_result = await self._get_subtitles_with_ytdlp(video_id, languages)
+                if ytdlp_result:
+                    return ytdlp_result
+            except Exception as ytdlp_e:
+                logger.error(f"yt-dlp fallback also failed: {str(ytdlp_e)}")
+            
             # If we get here, all attempts failed
             raise Exception(f"Не удалось получить субтитры для видео.\n\n"
                           f"Видео содержит субтитры, но все попытки их извлечения не удались:\n"
                           f"• Основные субтитры повреждены или недоступны\n"
                           f"• Переводные субтитры также недоступны\n"
+                          f"• Альтернативные методы извлечения не сработали\n"
                           f"• Технические проблемы с YouTube API\n\n"
                           f"Попробуйте другое видео или повторите попытку позже.")
     
@@ -460,3 +473,175 @@ class YouTubeProcessor:
         except Exception as e:
             logger.error(f"Error processing video: {str(e)}")
             return None, None 
+
+    async def _get_subtitles_with_ytdlp(self, video_id: str, languages: List[str] = None) -> str:
+        """
+        Alternative method to get subtitles using yt-dlp.
+        
+        Args:
+            video_id: YouTube video ID
+            languages: Preferred languages
+            
+        Returns:
+            str: Subtitle text or None if failed
+        """
+        if languages is None:
+            languages = ['ru', 'en']
+            
+        logger.info(f"Trying yt-dlp fallback for video {video_id}")
+        
+        try:
+            import yt_dlp
+            
+            # Create temporary directory for subtitles
+            with tempfile.TemporaryDirectory() as temp_dir:
+                
+                # Try each language
+                for lang in languages:
+                    try:
+                        logger.debug(f"Trying yt-dlp for language: {lang}")
+                        
+                        # Configure yt-dlp options
+                        ydl_opts = {
+                            'writesubtitles': True,
+                            'writeautomaticsub': True,
+                            'subtitleslangs': [lang, f'{lang}-orig'],
+                            'subtitlesformat': 'vtt',
+                            'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
+                            'quiet': True,
+                            'no_warnings': True,
+                            'skip_download': True,
+                        }
+                        
+                        url = f"https://www.youtube.com/watch?v={video_id}"
+                        
+                        # Run yt-dlp in executor to avoid blocking
+                        loop = asyncio.get_event_loop()
+                        
+                        def run_ytdlp():
+                            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                                ydl.download([url])
+                        
+                        await loop.run_in_executor(None, run_ytdlp)
+                        
+                        # Look for downloaded subtitle files
+                        subtitle_files = []
+                        for ext in ['vtt', 'ttml', 'srv3', 'srv2', 'srv1']:
+                            pattern = f"*.{lang}.{ext}"
+                            subtitle_files.extend(Path(temp_dir).glob(pattern))
+                            
+                            # Also try auto-generated pattern
+                            pattern = f"*.{lang}-orig.{ext}"
+                            subtitle_files.extend(Path(temp_dir).glob(pattern))
+                        
+                        if subtitle_files:
+                            # Read the first found subtitle file
+                            subtitle_file = subtitle_files[0]
+                            logger.debug(f"Found subtitle file: {subtitle_file}")
+                            
+                            with open(subtitle_file, 'r', encoding='utf-8') as f:
+                                content = f.read()
+                            
+                            # Parse VTT format
+                            if content and len(content.strip()) > 0:
+                                subtitle_text = self._parse_vtt_content(content)
+                                if subtitle_text and len(subtitle_text.strip()) >= 10:
+                                    logger.info(f"yt-dlp successful for {lang}: {len(subtitle_text)} chars")
+                                    return subtitle_text
+                        
+                    except Exception as e:
+                        logger.debug(f"yt-dlp failed for {lang}: {str(e)}")
+                        continue
+                
+                # Try auto-generated subtitles in any language
+                logger.debug("Trying yt-dlp with auto-generated subtitles")
+                ydl_opts = {
+                    'writeautomaticsub': True,
+                    'subtitlesformat': 'vtt',
+                    'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
+                    'quiet': True,
+                    'no_warnings': True,
+                    'skip_download': True,
+                }
+                
+                def run_ytdlp_auto():
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        ydl.download([url])
+                
+                await loop.run_in_executor(None, run_ytdlp_auto)
+                
+                # Look for any subtitle files
+                subtitle_files = []
+                for ext in ['vtt', 'ttml', 'srv3', 'srv2', 'srv1']:
+                    subtitle_files.extend(Path(temp_dir).glob(f"*.{ext}"))
+                
+                if subtitle_files:
+                    subtitle_file = subtitle_files[0]
+                    logger.debug(f"Found auto subtitle file: {subtitle_file}")
+                    
+                    with open(subtitle_file, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    
+                    if content and len(content.strip()) > 0:
+                        subtitle_text = self._parse_vtt_content(content)
+                        if subtitle_text and len(subtitle_text.strip()) >= 10:
+                            logger.info(f"yt-dlp auto subtitles successful: {len(subtitle_text)} chars")
+                            return subtitle_text
+                            
+        except ImportError:
+            logger.error("yt-dlp not available, install with: pip install yt-dlp")
+            return None
+        except Exception as e:
+            logger.error(f"yt-dlp fallback failed: {str(e)}")
+            return None
+        
+        return None
+    
+    def _parse_vtt_content(self, vtt_content: str) -> str:
+        """
+        Parse VTT subtitle content and extract text.
+        
+        Args:
+            vtt_content: VTT file content
+            
+        Returns:
+            str: Extracted text
+        """
+        try:
+            lines = vtt_content.split('\n')
+            text_lines = []
+            
+            skip_next = False
+            for line in lines:
+                line = line.strip()
+                
+                # Skip VTT headers and metadata
+                if line.startswith('WEBVTT') or line.startswith('NOTE') or line.startswith('STYLE'):
+                    continue
+                
+                # Skip timestamp lines (format: 00:00:00.000 --> 00:00:05.000)
+                if '-->' in line:
+                    skip_next = False
+                    continue
+                
+                # Skip empty lines and cue identifiers (just numbers)
+                if not line or line.isdigit():
+                    continue
+                
+                # Skip positioning tags like <c>
+                if line.startswith('<') and line.endswith('>'):
+                    continue
+                
+                # Clean HTML tags from subtitle text
+                clean_line = re.sub(r'<[^>]+>', '', line)
+                clean_line = clean_line.strip()
+                
+                if clean_line and len(clean_line) > 1:
+                    text_lines.append(clean_line)
+            
+            result = ' '.join(text_lines)
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error parsing VTT content: {str(e)}")
+            return "" 
