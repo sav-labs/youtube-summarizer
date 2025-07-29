@@ -149,30 +149,29 @@ class YouTubeProcessor:
         logger.info(f"Getting subtitles for video ID: {video_id}, preferred languages: {languages}")
         
         loop = asyncio.get_event_loop()
+        ytt_api = YouTubeTranscriptApi()
         
-        # Method 1: Try direct transcript API with each language
-        for lang in languages:
-            try:
-                logger.debug(f"Trying direct API for language: {lang}")
-                transcript = await loop.run_in_executor(
-                    None, lambda: YouTubeTranscriptApi.get_transcript(video_id, languages=[lang])
-                )
-                
-                if transcript and len(transcript) > 0:
-                    subtitle_text = self._construct_transcript_text(transcript)
-                    if subtitle_text and len(subtitle_text.strip()) >= 10:
-                        logger.info(f"Direct API successful for {lang}: {len(subtitle_text)} chars")
-                        return subtitle_text
-                        
-            except Exception as e:
-                logger.debug(f"Direct API failed for {lang}: {str(e)}")
-                continue
+        # Method 1: Try direct fetch API with preferred languages
+        try:
+            logger.debug("Trying direct fetch API")
+            transcript = await loop.run_in_executor(
+                None, lambda: ytt_api.fetch(video_id, languages=languages)
+            )
+            
+            if transcript and len(transcript) > 0:
+                subtitle_text = self._construct_transcript_text(transcript.to_raw_data())
+                if subtitle_text and len(subtitle_text.strip()) >= 10:
+                    logger.info(f"Direct fetch successful: {len(subtitle_text)} chars")
+                    return subtitle_text
+                    
+        except Exception as e:
+            logger.debug(f"Direct fetch failed: {str(e)}")
         
         # Method 2: Try with transcript list and find available
         try:
             logger.debug("Trying transcript list approach")
             transcript_list = await loop.run_in_executor(
-                None, lambda: YouTubeTranscriptApi.list_transcripts(video_id)
+                None, lambda: ytt_api.list(video_id)
             )
             
             # Try each preferred language
@@ -183,9 +182,9 @@ class YouTubeProcessor:
                     )
                     
                     if transcript_obj:
-                        transcript = await loop.run_in_executor(None, transcript_obj.fetch)
-                        if transcript and len(transcript) > 0:
-                            subtitle_text = self._construct_transcript_text(transcript)
+                        fetched_transcript = await loop.run_in_executor(None, transcript_obj.fetch)
+                        if fetched_transcript and len(fetched_transcript) > 0:
+                            subtitle_text = self._construct_transcript_text(fetched_transcript.to_raw_data())
                             if subtitle_text and len(subtitle_text.strip()) >= 10:
                                 logger.info(f"Transcript list successful for {lang}: {len(subtitle_text)} chars")
                                 return subtitle_text
@@ -202,9 +201,9 @@ class YouTubeProcessor:
                 )
                 
                 if transcript_obj:
-                    transcript = await loop.run_in_executor(None, transcript_obj.fetch)
-                    if transcript and len(transcript) > 0:
-                        subtitle_text = self._construct_transcript_text(transcript)
+                    fetched_transcript = await loop.run_in_executor(None, transcript_obj.fetch)
+                    if fetched_transcript and len(fetched_transcript) > 0:
+                        subtitle_text = self._construct_transcript_text(fetched_transcript.to_raw_data())
                         if subtitle_text and len(subtitle_text.strip()) >= 10:
                             logger.info(f"Auto-generated successful: {len(subtitle_text)} chars")
                             return subtitle_text
@@ -217,9 +216,9 @@ class YouTubeProcessor:
             available_transcripts = list(transcript_list)
             for transcript_obj in available_transcripts:
                 try:
-                    transcript = await loop.run_in_executor(None, transcript_obj.fetch)
-                    if transcript and len(transcript) > 0:
-                        subtitle_text = self._construct_transcript_text(transcript)
+                    fetched_transcript = await loop.run_in_executor(None, transcript_obj.fetch)
+                    if fetched_transcript and len(fetched_transcript) > 0:
+                        subtitle_text = self._construct_transcript_text(fetched_transcript.to_raw_data())
                         if subtitle_text and len(subtitle_text.strip()) >= 10:
                             logger.info(f"Any available successful ({transcript_obj.language_code}): {len(subtitle_text)} chars")
                             return subtitle_text
@@ -231,68 +230,52 @@ class YouTubeProcessor:
         except Exception as e:
             logger.debug(f"Transcript list approach failed: {str(e)}")
         
-        # Method 3: Try with different video URL formats
-        logger.debug("Trying different URL formats")
-        url_variants = [
-            video_id,  # Just ID
-            f"https://www.youtube.com/watch?v={video_id}",  # Full URL
-            f"https://youtu.be/{video_id}",  # Short URL
-        ]
-        
-        for url_variant in url_variants:
-            for lang in languages:
-                try:
-                    logger.debug(f"Trying URL variant {url_variant} with language {lang}")
-                    transcript = await loop.run_in_executor(
-                        None, lambda: YouTubeTranscriptApi.get_transcript(url_variant, languages=[lang])
-                    )
-                    
-                    if transcript and len(transcript) > 0:
-                        subtitle_text = self._construct_transcript_text(transcript)
-                        if subtitle_text and len(subtitle_text.strip()) >= 10:
-                            logger.info(f"URL variant successful: {len(subtitle_text)} chars")
-                            return subtitle_text
-                            
-                except Exception as e:
-                    logger.debug(f"URL variant failed for {url_variant} lang {lang}: {str(e)}")
-                    continue
-        
-        # Method 4: Try with manual language codes including auto-generated
-        logger.debug("Trying extended language codes")
-        extended_languages = []
+        # Method 3: Try each language separately
+        logger.debug("Trying each language separately")
         for lang in languages:
-            extended_languages.extend([
-                lang, 
-                f"{lang}-orig", 
-                f"{lang}-auto", 
-                f"{lang}-generated"
-            ])
-        
-        for lang in extended_languages:
             try:
-                logger.debug(f"Trying extended language: {lang}")
+                logger.debug(f"Trying language: {lang}")
                 transcript = await loop.run_in_executor(
-                    None, lambda: YouTubeTranscriptApi.get_transcript(video_id, languages=[lang])
+                    None, lambda: ytt_api.fetch(video_id, languages=[lang])
                 )
                 
                 if transcript and len(transcript) > 0:
-                    subtitle_text = self._construct_transcript_text(transcript)
+                    subtitle_text = self._construct_transcript_text(transcript.to_raw_data())
                     if subtitle_text and len(subtitle_text.strip()) >= 10:
-                        logger.info(f"Extended language successful for {lang}: {len(subtitle_text)} chars")
+                        logger.info(f"Single language successful for {lang}: {len(subtitle_text)} chars")
                         return subtitle_text
                         
             except Exception as e:
-                logger.debug(f"Extended language failed for {lang}: {str(e)}")
+                logger.debug(f"Single language failed for {lang}: {str(e)}")
+                continue
+        
+        # Method 4: Try with preserve formatting
+        logger.debug("Trying with preserve formatting")
+        for lang in languages:
+            try:
+                logger.debug(f"Trying with formatting for language: {lang}")
+                transcript = await loop.run_in_executor(
+                    None, lambda: ytt_api.fetch(video_id, languages=[lang], preserve_formatting=True)
+                )
+                
+                if transcript and len(transcript) > 0:
+                    subtitle_text = self._construct_transcript_text(transcript.to_raw_data())
+                    if subtitle_text and len(subtitle_text.strip()) >= 10:
+                        logger.info(f"With formatting successful for {lang}: {len(subtitle_text)} chars")
+                        return subtitle_text
+                        
+            except Exception as e:
+                logger.debug(f"With formatting failed for {lang}: {str(e)}")
                 continue
         
         # All methods failed
         raise Exception(f"Не удалось получить субтитры для видео {video_id}.\n\n"
                       f"Попробованы все доступные методы:\n"
-                      f"• Прямой API запрос\n"
+                      f"• Прямой fetch запрос\n"
                       f"• Поиск через список транскриптов\n"
                       f"• Автогенерируемые субтитры\n"
-                      f"• Различные форматы URL\n"
-                      f"• Расширенные языковые коды\n\n"
+                      f"• Отдельные языки\n"
+                      f"• С сохранением форматирования\n\n"
                       f"Видео может не содержать субтитров или они недоступны.")
     
     def _construct_transcript_text(self, subtitle_data: List[dict]) -> str:
