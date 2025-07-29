@@ -4,9 +4,6 @@ Handles fetching transcripts and metadata from YouTube videos.
 """
 import re
 import aiohttp
-import json
-import tempfile
-import os
 from pathlib import Path
 from typing import List, Optional, Tuple
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
@@ -134,7 +131,7 @@ class YouTubeProcessor:
 
     async def get_subtitles(self, video_id: str, languages: List[str] = None) -> str:
         """
-        Gets subtitles for a YouTube video with improved error handling.
+        Gets subtitles for a YouTube video using youtube-transcript-api 1.2.1.
         
         Args:
             video_id: YouTube video ID
@@ -151,179 +148,152 @@ class YouTubeProcessor:
             
         logger.info(f"Getting subtitles for video ID: {video_id}, preferred languages: {languages}")
         
-        try:
-            # Run the synchronous YouTube API call in a thread pool to avoid blocking the event loop
-            loop = asyncio.get_event_loop()
-            
-            # First, try to get transcript list
+        loop = asyncio.get_event_loop()
+        
+        # Method 1: Try direct transcript API with each language
+        for lang in languages:
             try:
-                transcript_list = await loop.run_in_executor(
-                    None, lambda: YouTubeTranscriptApi.list_transcripts(video_id)
+                logger.debug(f"Trying direct API for language: {lang}")
+                transcript = await loop.run_in_executor(
+                    None, lambda: YouTubeTranscriptApi.get_transcript(video_id, languages=[lang])
                 )
+                
+                if transcript and len(transcript) > 0:
+                    subtitle_text = self._construct_transcript_text(transcript)
+                    if subtitle_text and len(subtitle_text.strip()) >= 10:
+                        logger.info(f"Direct API successful for {lang}: {len(subtitle_text)} chars")
+                        return subtitle_text
+                        
             except Exception as e:
-                logger.error(f"Failed to get transcript list: {str(e)}")
-                raise Exception(f"Не удалось получить список субтитров: {str(e)}")
-            
-            # Try to get subtitles in preferred languages
-            transcript = None
-            used_language = None
+                logger.debug(f"Direct API failed for {lang}: {str(e)}")
+                continue
+        
+        # Method 2: Try with transcript list and find available
+        try:
+            logger.debug("Trying transcript list approach")
+            transcript_list = await loop.run_in_executor(
+                None, lambda: YouTubeTranscriptApi.list_transcripts(video_id)
+            )
             
             # Try each preferred language
             for lang in languages:
                 try:
-                    # Check if language is available
-                    available_languages = [t.language_code for t in transcript_list]
-                    logger.debug(f"Available languages: {available_languages}")
+                    transcript_obj = await loop.run_in_executor(
+                        None, lambda: transcript_list.find_transcript([lang])
+                    )
                     
-                    if lang in available_languages:
-                        transcript = await loop.run_in_executor(
-                            None, lambda: transcript_list.find_transcript([lang])
-                        )
-                        used_language = lang
-                        logger.info(f"Found subtitles in language: {lang}")
-                        
-                        # Try to fetch and validate
-                        try:
-                            subtitle_data = await loop.run_in_executor(None, transcript.fetch)
-                            if self._validate_subtitle_data(subtitle_data):
-                                subtitle_text = self._construct_transcript_text(subtitle_data)
-                                if subtitle_text and len(subtitle_text.strip()) >= 10:
-                                    logger.info(f"Successfully got subtitles: {len(subtitle_text)} chars")
-                                    return subtitle_text
-                        except Exception as fetch_e:
-                            logger.warning(f"Failed to fetch {lang} subtitles: {str(fetch_e)}")
-                            continue
+                    if transcript_obj:
+                        transcript = await loop.run_in_executor(None, transcript_obj.fetch)
+                        if transcript and len(transcript) > 0:
+                            subtitle_text = self._construct_transcript_text(transcript)
+                            if subtitle_text and len(subtitle_text.strip()) >= 10:
+                                logger.info(f"Transcript list successful for {lang}: {len(subtitle_text)} chars")
+                                return subtitle_text
+                                
                 except Exception as e:
-                    logger.debug(f"Could not get subtitles in language {lang}: {str(e)}")
+                    logger.debug(f"Transcript list failed for {lang}: {str(e)}")
+                    continue
             
-            # If direct subtitles failed, try translated subtitles
-            logger.info("Trying translated subtitles...")
+            # Try auto-generated transcripts
+            logger.debug("Trying auto-generated transcripts")
+            try:
+                transcript_obj = await loop.run_in_executor(
+                    None, lambda: transcript_list.find_generated_transcript(languages)
+                )
+                
+                if transcript_obj:
+                    transcript = await loop.run_in_executor(None, transcript_obj.fetch)
+                    if transcript and len(transcript) > 0:
+                        subtitle_text = self._construct_transcript_text(transcript)
+                        if subtitle_text and len(subtitle_text.strip()) >= 10:
+                            logger.info(f"Auto-generated successful: {len(subtitle_text)} chars")
+                            return subtitle_text
+                            
+            except Exception as e:
+                logger.debug(f"Auto-generated failed: {str(e)}")
+            
+            # Try any available transcript
+            logger.debug("Trying any available transcript")
+            available_transcripts = list(transcript_list)
+            for transcript_obj in available_transcripts:
+                try:
+                    transcript = await loop.run_in_executor(None, transcript_obj.fetch)
+                    if transcript and len(transcript) > 0:
+                        subtitle_text = self._construct_transcript_text(transcript)
+                        if subtitle_text and len(subtitle_text.strip()) >= 10:
+                            logger.info(f"Any available successful ({transcript_obj.language_code}): {len(subtitle_text)} chars")
+                            return subtitle_text
+                            
+                except Exception as e:
+                    logger.debug(f"Available transcript failed ({transcript_obj.language_code}): {str(e)}")
+                    continue
+                    
+        except Exception as e:
+            logger.debug(f"Transcript list approach failed: {str(e)}")
+        
+        # Method 3: Try with different video URL formats
+        logger.debug("Trying different URL formats")
+        url_variants = [
+            video_id,  # Just ID
+            f"https://www.youtube.com/watch?v={video_id}",  # Full URL
+            f"https://youtu.be/{video_id}",  # Short URL
+        ]
+        
+        for url_variant in url_variants:
             for lang in languages:
                 try:
-                    # Try to get any available transcript and translate it
-                    available_transcripts = list(transcript_list)
-                    for base_transcript in available_transcripts:
-                        try:
-                            logger.debug(f"Trying to translate from {base_transcript.language_code} to {lang}")
-                            
-                            # Try to translate the base transcript
-                            translated = await loop.run_in_executor(
-                                None, lambda: base_transcript.translate(lang)
-                            )
-                            
-                            if translated:
-                                subtitle_data = await loop.run_in_executor(None, translated.fetch)
-                                if self._validate_subtitle_data(subtitle_data):
-                                    subtitle_text = self._construct_transcript_text(subtitle_data)
-                                    if subtitle_text and len(subtitle_text.strip()) >= 10:
-                                        logger.info(f"Successfully got translated subtitles ({base_transcript.language_code} -> {lang}): {len(subtitle_text)} chars")
-                                        return subtitle_text
-                                        
-                        except Exception as trans_e:
-                            logger.debug(f"Translation failed from {base_transcript.language_code} to {lang}: {str(trans_e)}")
-                            continue
-                            
-                except Exception as e:
-                    logger.debug(f"Translation approach failed for {lang}: {str(e)}")
-            
-            # If no subtitles in preferred languages, try generated ones
-            if not transcript:
-                logger.info("No subtitles in preferred languages, trying generated ones")
-                try:
+                    logger.debug(f"Trying URL variant {url_variant} with language {lang}")
                     transcript = await loop.run_in_executor(
-                        None, lambda: transcript_list.find_generated_transcript(languages)
+                        None, lambda: YouTubeTranscriptApi.get_transcript(url_variant, languages=[lang])
                     )
-                    if transcript:
-                        used_language = transcript.language_code
-                        logger.info(f"Found generated subtitles in: {used_language}")
-                        
-                        # Try to fetch generated subtitles
-                        try:
-                            subtitle_data = await loop.run_in_executor(None, transcript.fetch)
-                            if self._validate_subtitle_data(subtitle_data):
-                                subtitle_text = self._construct_transcript_text(subtitle_data)
-                                if subtitle_text and len(subtitle_text.strip()) >= 10:
-                                    logger.info(f"Successfully got generated subtitles: {len(subtitle_text)} chars")
-                                    return subtitle_text
-                        except Exception as gen_e:
-                            logger.warning(f"Failed to fetch generated subtitles: {str(gen_e)}")
+                    
+                    if transcript and len(transcript) > 0:
+                        subtitle_text = self._construct_transcript_text(transcript)
+                        if subtitle_text and len(subtitle_text.strip()) >= 10:
+                            logger.info(f"URL variant successful: {len(subtitle_text)} chars")
+                            return subtitle_text
                             
                 except Exception as e:
-                    logger.debug(f"Could not get generated subtitles: {str(e)}")
-                
-            # If that didn't work either, use any available subtitles
-            if not transcript:
-                logger.info("Trying any available subtitles")
-                available_transcripts = list(transcript_list)
-                if available_transcripts:
-                    # Try each available transcript
-                    for available_transcript in available_transcripts:
-                        try:
-                            used_language = available_transcript.language_code
-                            logger.debug(f"Trying available language: {used_language}")
-                            
-                            subtitle_data = await loop.run_in_executor(None, available_transcript.fetch)
-                            if self._validate_subtitle_data(subtitle_data):
-                                subtitle_text = self._construct_transcript_text(subtitle_data)
-                                if subtitle_text and len(subtitle_text.strip()) >= 10:
-                                    logger.info(f"Successfully got subtitles in {used_language}: {len(subtitle_text)} chars")
-                                    return subtitle_text
-                                    
-                        except Exception as avail_e:
-                            logger.debug(f"Failed to get subtitles in {available_transcript.language_code}: {str(avail_e)}")
-                            continue
-                    
-                    # If direct approach failed, try translating any available transcript to English
-                    logger.info("Trying to translate any available transcript to English")
-                    for available_transcript in available_transcripts:
-                        try:
-                            logger.debug(f"Translating {available_transcript.language_code} to en")
-                            translated = await loop.run_in_executor(
-                                None, lambda: available_transcript.translate('en')
-                            )
-                            
-                            if translated:
-                                subtitle_data = await loop.run_in_executor(None, translated.fetch)
-                                if self._validate_subtitle_data(subtitle_data):
-                                    subtitle_text = self._construct_transcript_text(subtitle_data)
-                                    if subtitle_text and len(subtitle_text.strip()) >= 10:
-                                        logger.info(f"Successfully got translated subtitles ({available_transcript.language_code} -> en): {len(subtitle_text)} chars")
-                                        return subtitle_text
-                                        
-                        except Exception as final_trans_e:
-                            logger.debug(f"Final translation failed: {str(final_trans_e)}")
-                            continue
-                else:
-                    raise Exception("Для этого видео нет доступных субтитров")
-                    
-        except TranscriptsDisabled as e:
-            logger.error("Subtitles disabled for this video")
-            raise Exception("Субтитры отключены для этого видео")
+                    logger.debug(f"URL variant failed for {url_variant} lang {lang}: {str(e)}")
+                    continue
         
-        except NoTranscriptFound as e:
-            logger.error("No subtitles found for this video")
-            raise Exception("Для этого видео не найдены субтитры")
-            
-        except Exception as e:
-            logger.error(f"Error getting subtitles: {str(e)}")
-            
-            # Try yt-dlp as final fallback
-            logger.info("Trying yt-dlp as final fallback")
+        # Method 4: Try with manual language codes including auto-generated
+        logger.debug("Trying extended language codes")
+        extended_languages = []
+        for lang in languages:
+            extended_languages.extend([
+                lang, 
+                f"{lang}-orig", 
+                f"{lang}-auto", 
+                f"{lang}-generated"
+            ])
+        
+        for lang in extended_languages:
             try:
-                ytdlp_result = await self._get_subtitles_with_ytdlp(video_id, languages)
-                if ytdlp_result:
-                    return ytdlp_result
-            except Exception as ytdlp_e:
-                logger.error(f"yt-dlp fallback also failed: {str(ytdlp_e)}")
-            
-            # If we get here, all attempts failed
-            raise Exception(f"Не удалось получить субтитры для видео.\n\n"
-                          f"Видео содержит субтитры, но все попытки их извлечения не удались:\n"
-                          f"• Основные субтитры повреждены или недоступны\n"
-                          f"• Переводные субтитры также недоступны\n"
-                          f"• Альтернативные методы извлечения не сработали\n"
-                          f"• Технические проблемы с YouTube API\n\n"
-                          f"Попробуйте другое видео или повторите попытку позже.")
+                logger.debug(f"Trying extended language: {lang}")
+                transcript = await loop.run_in_executor(
+                    None, lambda: YouTubeTranscriptApi.get_transcript(video_id, languages=[lang])
+                )
+                
+                if transcript and len(transcript) > 0:
+                    subtitle_text = self._construct_transcript_text(transcript)
+                    if subtitle_text and len(subtitle_text.strip()) >= 10:
+                        logger.info(f"Extended language successful for {lang}: {len(subtitle_text)} chars")
+                        return subtitle_text
+                        
+            except Exception as e:
+                logger.debug(f"Extended language failed for {lang}: {str(e)}")
+                continue
+        
+        # All methods failed
+        raise Exception(f"Не удалось получить субтитры для видео {video_id}.\n\n"
+                      f"Попробованы все доступные методы:\n"
+                      f"• Прямой API запрос\n"
+                      f"• Поиск через список транскриптов\n"
+                      f"• Автогенерируемые субтитры\n"
+                      f"• Различные форматы URL\n"
+                      f"• Расширенные языковые коды\n\n"
+                      f"Видео может не содержать субтитров или они недоступны.")
     
     def _construct_transcript_text(self, subtitle_data: List[dict]) -> str:
         """
@@ -465,193 +435,10 @@ class YouTubeProcessor:
             except Exception as api_error:
                 logger.warning(f"Standard API failed: {str(api_error)}")
             
-            # If standard API failed, immediately try yt-dlp
-            if not transcript:
-                logger.info("Trying yt-dlp fallback immediately...")
-                try:
-                    transcript = await self._get_subtitles_with_ytdlp(video_id, languages)
-                    if transcript and len(transcript.strip()) >= 10:
-                        logger.info(f"yt-dlp successful: {len(transcript)} characters")
-                        return video_title, transcript
-                except Exception as ytdlp_error:
-                    logger.error(f"yt-dlp also failed: {str(ytdlp_error)}")
-            
-            # If both methods failed
+            # If standard API failed
             logger.warning("All subtitle extraction methods failed")
             return None, None
         
         except Exception as e:
             logger.error(f"Error processing video: {str(e)}")
-            return None, None
-
-    async def _get_subtitles_with_ytdlp(self, video_id: str, languages: List[str] = None) -> str:
-        """
-        Alternative method to get subtitles using yt-dlp.
-        
-        Args:
-            video_id: YouTube video ID
-            languages: Preferred languages
-            
-        Returns:
-            str: Subtitle text or None if failed
-        """
-        if languages is None:
-            languages = ['ru', 'en']
-            
-        logger.info(f"Trying yt-dlp fallback for video {video_id}")
-        
-        try:
-            import yt_dlp
-            
-            # Create temporary directory for subtitles
-            with tempfile.TemporaryDirectory() as temp_dir:
-                
-                # Try each language
-                for lang in languages:
-                    try:
-                        logger.debug(f"Trying yt-dlp for language: {lang}")
-                        
-                        # Configure yt-dlp options
-                        ydl_opts = {
-                            'writesubtitles': True,
-                            'writeautomaticsub': True,
-                            'subtitleslangs': [lang, f'{lang}-orig'],
-                            'subtitlesformat': 'vtt',
-                            'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
-                            'quiet': True,
-                            'no_warnings': True,
-                            'skip_download': True,
-                        }
-                        
-                        url = f"https://www.youtube.com/watch?v={video_id}"
-                        
-                        # Run yt-dlp in executor to avoid blocking
-                        loop = asyncio.get_event_loop()
-                        
-                        def run_ytdlp():
-                            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                                ydl.download([url])
-                        
-                        await loop.run_in_executor(None, run_ytdlp)
-                        
-                        # Look for downloaded subtitle files
-                        subtitle_files = []
-                        for ext in ['vtt', 'ttml', 'srv3', 'srv2', 'srv1']:
-                            pattern = f"*.{lang}.{ext}"
-                            subtitle_files.extend(Path(temp_dir).glob(pattern))
-                            
-                            # Also try auto-generated pattern
-                            pattern = f"*.{lang}-orig.{ext}"
-                            subtitle_files.extend(Path(temp_dir).glob(pattern))
-                        
-                        if subtitle_files:
-                            # Read the first found subtitle file
-                            subtitle_file = subtitle_files[0]
-                            logger.debug(f"Found subtitle file: {subtitle_file}")
-                            
-                            with open(subtitle_file, 'r', encoding='utf-8') as f:
-                                content = f.read()
-                            
-                            # Parse VTT format
-                            if content and len(content.strip()) > 0:
-                                subtitle_text = self._parse_vtt_content(content)
-                                if subtitle_text and len(subtitle_text.strip()) >= 10:
-                                    logger.info(f"yt-dlp successful for {lang}: {len(subtitle_text)} chars")
-                                    return subtitle_text
-                        
-                    except Exception as e:
-                        logger.debug(f"yt-dlp failed for {lang}: {str(e)}")
-                        continue
-                
-                # Try auto-generated subtitles in any language
-                logger.debug("Trying yt-dlp with auto-generated subtitles")
-                ydl_opts = {
-                    'writeautomaticsub': True,
-                    'subtitlesformat': 'vtt',
-                    'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
-                    'quiet': True,
-                    'no_warnings': True,
-                    'skip_download': True,
-                }
-                
-                def run_ytdlp_auto():
-                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        ydl.download([url])
-                
-                await loop.run_in_executor(None, run_ytdlp_auto)
-                
-                # Look for any subtitle files
-                subtitle_files = []
-                for ext in ['vtt', 'ttml', 'srv3', 'srv2', 'srv1']:
-                    subtitle_files.extend(Path(temp_dir).glob(f"*.{ext}"))
-                
-                if subtitle_files:
-                    subtitle_file = subtitle_files[0]
-                    logger.debug(f"Found auto subtitle file: {subtitle_file}")
-                    
-                    with open(subtitle_file, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                    
-                    if content and len(content.strip()) > 0:
-                        subtitle_text = self._parse_vtt_content(content)
-                        if subtitle_text and len(subtitle_text.strip()) >= 10:
-                            logger.info(f"yt-dlp auto subtitles successful: {len(subtitle_text)} chars")
-                            return subtitle_text
-                            
-        except ImportError:
-            logger.error("yt-dlp not available, install with: pip install yt-dlp")
-            return None
-        except Exception as e:
-            logger.error(f"yt-dlp fallback failed: {str(e)}")
-            return None
-        
-        return None
-    
-    def _parse_vtt_content(self, vtt_content: str) -> str:
-        """
-        Parse VTT subtitle content and extract text.
-        
-        Args:
-            vtt_content: VTT file content
-            
-        Returns:
-            str: Extracted text
-        """
-        try:
-            lines = vtt_content.split('\n')
-            text_lines = []
-            
-            skip_next = False
-            for line in lines:
-                line = line.strip()
-                
-                # Skip VTT headers and metadata
-                if line.startswith('WEBVTT') or line.startswith('NOTE') or line.startswith('STYLE'):
-                    continue
-                
-                # Skip timestamp lines (format: 00:00:00.000 --> 00:00:05.000)
-                if '-->' in line:
-                    skip_next = False
-                    continue
-                
-                # Skip empty lines and cue identifiers (just numbers)
-                if not line or line.isdigit():
-                    continue
-                
-                # Skip positioning tags like <c>
-                if line.startswith('<') and line.endswith('>'):
-                    continue
-                
-                # Clean HTML tags from subtitle text
-                clean_line = re.sub(r'<[^>]+>', '', line)
-                clean_line = clean_line.strip()
-                
-                if clean_line and len(clean_line) > 1:
-                    text_lines.append(clean_line)
-            
-            result = ' '.join(text_lines)
-            return result
-            
-        except Exception as e:
-            logger.error(f"Error parsing VTT content: {str(e)}")
-            return "" 
+            return None, None 
