@@ -9,6 +9,7 @@ from datetime import datetime
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, BotCommand
 from aiogram.enums import ParseMode
+from aiogram.filters import Command
 from loguru import logger
 
 from src.config.settings import TELEGRAM_BOT_TOKEN, ADMIN_USER_ID, YOUTUBE_REGEX
@@ -42,33 +43,23 @@ class TelegramBot:
         self.summarizer = Summarizer()
         self.ai_agent = AIAgent()
         
-        # Set up command menu
-        self._setup_bot_commands()
-        
         # Register handlers
         self.register_handlers()
         
         logger.info("Telegram bot initialized")
 
-    async def _setup_bot_commands(self):
-        """Setup bot commands menu."""
-        commands = [
-            BotCommand(command="start", description="Запустить бота"),
-            BotCommand(command="help", description="Помощь по использованию"),
-            BotCommand(command="models", description="Выбрать модель"),
-            BotCommand(command="language", description="Выбрать язык"),
-            BotCommand(command="settings", description="Настройки")
-        ]
-        await self.bot.set_my_commands(commands)
+    def _setup_bot_commands(self):
+        """Setup bot commands menu (will be called during start)."""
+        pass  # We'll set commands during start method
 
     def register_handlers(self):
         """Register all message and callback handlers."""
-        # Command handlers
-        self.dp.message.register(self.cmd_start, commands=["start"])
-        self.dp.message.register(self.cmd_help, commands=["help"])
-        self.dp.message.register(self.cmd_models, commands=["models"])
-        self.dp.message.register(self.cmd_language, commands=["language"])
-        self.dp.message.register(self.cmd_settings, commands=["settings"])
+        # Command handlers with proper aiogram 3.x syntax
+        self.dp.message.register(self.cmd_start, Command(commands=["start"]))
+        self.dp.message.register(self.cmd_help, Command(commands=["help"]))
+        self.dp.message.register(self.cmd_models, Command(commands=["models"]))
+        self.dp.message.register(self.cmd_language, Command(commands=["language"]))
+        self.dp.message.register(self.cmd_settings, Command(commands=["settings"]))
         
         # Button handlers
         self.dp.message.register(self.cmd_help, lambda msg: msg.text == "❓ Помощь")
@@ -93,6 +84,16 @@ class TelegramBot:
     
     async def start(self):
         """Start the bot polling with improved error handling and retry logic."""
+        # Set up bot commands
+        commands = [
+            BotCommand(command="start", description="Запустить бота"),
+            BotCommand(command="help", description="Помощь по использованию"),
+            BotCommand(command="models", description="Выбрать модель"),
+            BotCommand(command="language", description="Выбрать язык"),
+            BotCommand(command="settings", description="Настройки")
+        ]
+        await self.bot.set_my_commands(commands)
+        
         max_retries = 5
         retry_delay = 1.0
         retry_count = 0
