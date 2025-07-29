@@ -59,11 +59,19 @@ class UserManager:
             with open(self.data_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 
+            users_loaded = 0
             for user_data in data.values():
                 user = User.from_dict(user_data)
                 self.users[user.user_id] = user
+                users_loaded += 1
             
-            self.logger.info(f"Loaded {len(self.users)} users from {self.data_file}")
+            self.logger.info(f"Loaded {users_loaded} users from {self.data_file}")
+            
+            # Auto-migrate: Save users to update file structure with new fields
+            if users_loaded > 0:
+                self._save_users()
+                self.logger.info("Auto-migrated users data to current format")
+                
         except Exception as e:
             self.logger.error(f"Error loading users from {self.data_file}: {e}")
     

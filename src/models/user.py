@@ -135,4 +135,11 @@ class User:
         if updated_at and isinstance(updated_at, str):
             data["updated_at"] = datetime.fromisoformat(updated_at)
         
+        # Handle new fields for backwards compatibility
+        if "forced_model" not in data:
+            data["forced_model"] = None
+        
+        if "is_model_locked" not in data:
+            data["is_model_locked"] = False
+        
         return cls(**data) 
