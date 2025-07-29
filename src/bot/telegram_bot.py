@@ -13,7 +13,7 @@ from aiogram.filters import Command
 from loguru import logger
 
 from src.config.settings import TELEGRAM_BOT_TOKEN, ADMIN_USER_ID, YOUTUBE_REGEX
-from src.models.user_manager import UserManager
+from src.models.user_db_manager import UserDatabaseManager
 from src.youtube_processor import YouTubeProcessor
 from src.summarizer import Summarizer
 from src.ai_agent import AIAgent
@@ -40,7 +40,12 @@ class TelegramBot:
         """Initialize the Telegram bot with all necessary components."""
         self.bot = Bot(token=TELEGRAM_BOT_TOKEN, parse_mode=ParseMode.MARKDOWN)
         self.dp = Dispatcher()
-        self.user_manager = UserManager()
+        self.user_manager = UserDatabaseManager("data/users.db")
+        
+        # Try to migrate from old JSON file if it exists
+        migrated = self.user_manager.migrate_from_json("data/user_data.json")
+        if migrated > 0:
+            logger.info(f"Migrated {migrated} users from JSON to database")
         self.youtube_processor = YouTubeProcessor()
         self.summarizer = Summarizer()
         self.ai_agent = AIAgent()
